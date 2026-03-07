@@ -1,7 +1,9 @@
 # ---- 构建阶段 ----
-FROM golang:1.24.13-alpine3.22 AS builder
+FROM registry.cn-hangzhou.aliyuncs.com/library/golang:1.24.13-alpine3.22 AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
+
+ENV GOPROXY=https://goproxy.cn,direct
 
 WORKDIR /src
 
@@ -14,7 +16,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/bookeeper ./cmd/bookeeper/
 
 # ---- 运行阶段 ----
-FROM alpine:3.22
+FROM registry.cn-hangzhou.aliyuncs.com/library/alpine:3.22
 
 RUN apk add --no-cache ca-certificates tzdata
 
