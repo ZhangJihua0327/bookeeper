@@ -1,6 +1,6 @@
 module github.com/zhangjihua0327/bookeeper
 
-go 1.25.6
+go 1.24
 
 require github.com/larksuite/oapi-sdk-go/v3 v3.5.3
 
