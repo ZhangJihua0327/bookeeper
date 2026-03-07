@@ -1,7 +1,8 @@
 # ---- 构建阶段 ----
 FROM golang:1.24.13-alpine3.22 AS builder
 
-RUN apk add --no-cache git ca-certificates tzdata
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache git ca-certificates tzdata
 
 ENV GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
 
@@ -18,7 +19,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/bookeeper ./cmd/b
 # ---- 运行阶段 ----
 FROM alpine:3.22
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata
 
 # 设置时区为上海
 ENV TZ=Asia/Shanghai
