@@ -8,5 +8,5 @@ import (
 // NewLarkClient 创建飞书 API 客户端
 // SDK 自动管理 Tenant Access Token 的获取和刷新
 func NewLarkClient(cfg *config.Config) *lark.Client {
-	return lark.NewClient(cfg.AppID, cfg.AppSecret)
+	return lark.NewClient(cfg.Feishu.AppID, cfg.Feishu.AppSecret)
 }

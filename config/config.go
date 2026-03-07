@@ -4,29 +4,38 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/joho/godotenv"
+	"gopkg.in/yaml.v3"
 )
 
 // Config 应用配置
 type Config struct {
-	AppID             string // 飞书应用 ID
-	AppSecret         string // 飞书应用密钥
-	BitableAppToken   string // 多维表格应用 token
-	PumpTruckTableID  string // 泵车数据表 ID
-	MixerTruckTableID string // 搅拌车数据表 ID
+	Feishu  FeishuConfig  `yaml:"feishu"`
+	Bitable BitableConfig `yaml:"bitable"`
 }
 
-// LoadFromEnv 从环境变量加载配置，优先尝试加载 .env 文件
-func LoadFromEnv() (*Config, error) {
-	// 尝试加载 .env 文件，文件不存在不报错
-	_ = godotenv.Load()
+// FeishuConfig 飞书应用配置
+type FeishuConfig struct {
+	AppID     string `yaml:"app_id"`
+	AppSecret string `yaml:"app_secret"`
+}
 
-	cfg := &Config{
-		AppID:             os.Getenv("FEISHU_APP_ID"),
-		AppSecret:         os.Getenv("FEISHU_APP_SECRET"),
-		BitableAppToken:   os.Getenv("BITABLE_APP_TOKEN"),
-		PumpTruckTableID:  os.Getenv("PUMP_TRUCK_TABLE_ID"),
-		MixerTruckTableID: os.Getenv("MIXER_TRUCK_TABLE_ID"),
+// BitableConfig 多维表格配置
+type BitableConfig struct {
+	AppToken          string `yaml:"app_token"`
+	PumpTruckTableID  string `yaml:"pump_truck_table_id"`
+	MixerTruckTableID string `yaml:"mixer_truck_table_id"`
+}
+
+// Load 从指定路径的 YAML 文件加载配置
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取配置文件失败: %w", err)
+	}
+
+	cfg := &Config{}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -38,16 +47,16 @@ func LoadFromEnv() (*Config, error) {
 
 func (c *Config) validate() error {
 	required := map[string]string{
-		"FEISHU_APP_ID":        c.AppID,
-		"FEISHU_APP_SECRET":    c.AppSecret,
-		"BITABLE_APP_TOKEN":    c.BitableAppToken,
-		"PUMP_TRUCK_TABLE_ID":  c.PumpTruckTableID,
-		"MIXER_TRUCK_TABLE_ID": c.MixerTruckTableID,
+		"feishu.app_id":                c.Feishu.AppID,
+		"feishu.app_secret":            c.Feishu.AppSecret,
+		"bitable.app_token":            c.Bitable.AppToken,
+		"bitable.pump_truck_table_id":  c.Bitable.PumpTruckTableID,
+		"bitable.mixer_truck_table_id": c.Bitable.MixerTruckTableID,
 	}
 
 	for name, value := range required {
 		if value == "" {
-			return fmt.Errorf("缺少必要的环境变量: %s", name)
+			return fmt.Errorf("缺少必要的配置项: %s", name)
 		}
 	}
 

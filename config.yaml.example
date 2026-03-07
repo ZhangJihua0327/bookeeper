@@ -1,0 +1,8 @@
+feishu:
+  app_id: your_app_id
+  app_secret: your_app_secret
+
+bitable:
+  app_token: your_bitable_app_token
+  pump_truck_table_id: your_pump_truck_table_id
+  mixer_truck_table_id: your_mixer_truck_table_id

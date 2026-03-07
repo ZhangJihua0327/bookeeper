@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.LoadFromEnv()
+	cfg, err := config.Load("config.yaml")
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
@@ -21,9 +21,9 @@ func main() {
 	ctx := context.Background()
 
 	// 初始化 Repository
-	pumpTruckRepo := bitable.NewPumpTruckRepository(client, cfg.BitableAppToken, cfg.PumpTruckTableID)
-	mixerTruckRepo := bitable.NewMixerTruckRepository(client, cfg.BitableAppToken, cfg.MixerTruckTableID)
-	fieldOptionMgr := bitable.NewFieldOptionManager(client, cfg.BitableAppToken)
+	pumpTruckRepo := bitable.NewPumpTruckRepository(client, cfg.Bitable.AppToken, cfg.Bitable.PumpTruckTableID)
+	mixerTruckRepo := bitable.NewMixerTruckRepository(client, cfg.Bitable.AppToken, cfg.Bitable.MixerTruckTableID)
+	fieldOptionMgr := bitable.NewFieldOptionManager(client, cfg.Bitable.AppToken)
 
 	// 验证：创建一条泵车记录
 	fmt.Println("=== 创建泵车记录 ===")
@@ -56,7 +56,7 @@ func main() {
 
 	// 验证：查询泵车表"车型"字段的可选值
 	fmt.Println("\n=== 泵车表-车型选项 ===")
-	truckModels, err := fieldOptionMgr.GetFieldOptions(ctx, cfg.PumpTruckTableID, "车型")
+	truckModels, err := fieldOptionMgr.GetFieldOptions(ctx, cfg.Bitable.PumpTruckTableID, "车型")
 	if err != nil {
 		log.Fatalf("查询车型选项失败: %v", err)
 	}
