@@ -2,14 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"net/http"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
-	larkcard "github.com/larksuite/oapi-sdk-go/v3/card"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
-	"github.com/larksuite/oapi-sdk-go/v3/core/httpserverext"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
@@ -54,30 +50,14 @@ func main() {
 	msgHandler := bot.NewMessageHandler(larkClient, sessionMgr)
 
 	// 6. 创建事件分发器（WebSocket 模式参数为空字符串）
+	cardCallbackHandler := bot.NewCardCallbackHandler(sessionMgr)
 	eventHandler := dispatcher.NewEventDispatcher("", "").
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 			return msgHandler.Handle(ctx, event)
-		})
+		}).
+		OnP2CardActionTrigger(cardCallbackHandler.Handle)
 
-	// 7. 创建卡片回调处理器
-	cardCallbackHandler := bot.NewCardCallbackHandler(sessionMgr)
-	cardHandler := larkcard.NewCardActionHandler("", "", cardCallbackHandler.Handle)
-
-	// 8. 启动 HTTP 服务器（卡片回调端点）
-	port := cfg.Bot.CardCallbackPort
-	if port == 0 {
-		port = 9999
-	}
-	http.HandleFunc("/webhook/card", httpserverext.NewCardActionHandlerFunc(cardHandler))
-	go func() {
-		addr := fmt.Sprintf(":%d", port)
-		log.Printf("卡片回调 HTTP 服务器启动在 %s", addr)
-		if err := http.ListenAndServe(addr, nil); err != nil {
-			log.Fatalf("HTTP 服务器启动失败: %v", err)
-		}
-	}()
-
-	// 9. 启动 WebSocket 长连接（阻塞主线程）
+	// 7. 启动 WebSocket 长连接（阻塞主线程）
 	log.Println("正在启动 WebSocket 长连接...")
 	wsClient := larkws.NewClient(cfg.Feishu.AppID, cfg.Feishu.AppSecret,
 		larkws.WithEventHandler(eventHandler),

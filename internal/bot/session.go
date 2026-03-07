@@ -113,15 +113,15 @@ func (s *SessionManager) HandleMixerTruck(ctx context.Context, chatId, messageId
 	return nil
 }
 
-// ConfirmPumpTruck 确认提交泵车记录到多维表格
-func (s *SessionManager) ConfirmPumpTruck(ctx context.Context, record *domain.PumpTruckRecord, unknownOpts []service.UnknownOption) (string, error) {
+// ConfirmPumpTruck 确认提交泵车记录到多维表格，并回读写入的数据
+func (s *SessionManager) ConfirmPumpTruck(ctx context.Context, record *domain.PumpTruckRecord, unknownOpts []service.UnknownOption) (*domain.PumpTruckRecord, error) {
 	log.Printf("[Session] 开始确认提交泵车记录 customer=%s driver=%s volume=%.1f unknownOpts=%d", record.CustomerName, record.Driver, record.Volume, len(unknownOpts))
 	// 先添加未知选项
 	for _, opt := range unknownOpts {
 		log.Printf("[Session] 添加泵车未知选项 field=%s value=%s", opt.FieldName, opt.Value)
 		if err := s.fieldOptionMgr.AddFieldOption(ctx, s.bitableCfg.PumpTruckTableID, opt.FieldName, opt.Value); err != nil {
 			log.Printf("[Session] 添加泵车选项失败 field=%s value=%s err=%v", opt.FieldName, opt.Value, err)
-			return "", fmt.Errorf("添加选项 %s=%s 失败: %w", opt.FieldName, opt.Value, err)
+			return nil, fmt.Errorf("添加选项 %s=%s 失败: %w", opt.FieldName, opt.Value, err)
 		}
 	}
 
@@ -129,32 +129,50 @@ func (s *SessionManager) ConfirmPumpTruck(ctx context.Context, record *domain.Pu
 	recordID, err := s.pumpTruckRepo.Create(ctx, record)
 	if err != nil {
 		log.Printf("[Session] 创建泵车记录失败: err=%v", err)
-		return "", fmt.Errorf("创建泵车记录失败: %w", err)
+		return nil, fmt.Errorf("创建泵车记录失败: %w", err)
 	}
 
-	log.Printf("[Session] 泵车记录创建成功 recordId=%s", recordID)
-	return recordID, nil
+	log.Printf("[Session] 泵车记录创建成功 recordId=%s，开始回读", recordID)
+
+	// 回读写入的数据
+	written, err := s.pumpTruckRepo.GetByID(ctx, recordID)
+	if err != nil {
+		log.Printf("[Session] 回读泵车记录失败: recordId=%s err=%v", recordID, err)
+		// 回读失败不影响提交结果，返回原始记录
+		record.RecordID = recordID
+		return record, nil
+	}
+
+	return written, nil
 }
 
-// ConfirmMixerTruck 确认提交搅拌车记录到多维表格
-func (s *SessionManager) ConfirmMixerTruck(ctx context.Context, record *domain.MixerTruckRecord, unknownOpts []service.UnknownOption) (string, error) {
+// ConfirmMixerTruck 确认提交搅拌车记录到多维表格，并回读写入的数据
+func (s *SessionManager) ConfirmMixerTruck(ctx context.Context, record *domain.MixerTruckRecord, unknownOpts []service.UnknownOption) (*domain.MixerTruckRecord, error) {
 	log.Printf("[Session] 开始确认提交搅拌车记录 customer=%s drivers=%v volume=%.1f unknownOpts=%d", record.CustomerName, record.Drivers, record.Volume, len(unknownOpts))
 	for _, opt := range unknownOpts {
 		log.Printf("[Session] 添加搅拌车未知选项 field=%s value=%s", opt.FieldName, opt.Value)
 		if err := s.fieldOptionMgr.AddFieldOption(ctx, s.bitableCfg.MixerTruckTableID, opt.FieldName, opt.Value); err != nil {
 			log.Printf("[Session] 添加搅拌车选项失败 field=%s value=%s err=%v", opt.FieldName, opt.Value, err)
-			return "", fmt.Errorf("添加选项 %s=%s 失败: %w", opt.FieldName, opt.Value, err)
+			return nil, fmt.Errorf("添加选项 %s=%s 失败: %w", opt.FieldName, opt.Value, err)
 		}
 	}
 
 	recordID, err := s.mixerTruckRepo.Create(ctx, record)
 	if err != nil {
 		log.Printf("[Session] 创建搅拌车记录失败: err=%v", err)
-		return "", fmt.Errorf("创建搅拌车记录失败: %w", err)
+		return nil, fmt.Errorf("创建搅拌车记录失败: %w", err)
 	}
 
-	log.Printf("[Session] 搅拌车记录创建成功 recordId=%s", recordID)
-	return recordID, nil
+	log.Printf("[Session] 搅拌车记录创建成功 recordId=%s，开始回读", recordID)
+
+	written, err := s.mixerTruckRepo.GetByID(ctx, recordID)
+	if err != nil {
+		log.Printf("[Session] 回读搅拌车记录失败: recordId=%s err=%v", recordID, err)
+		record.RecordID = recordID
+		return record, nil
+	}
+
+	return written, nil
 }
 
 // HandleAutoClassify 通过 AI 自动分类并处理记录

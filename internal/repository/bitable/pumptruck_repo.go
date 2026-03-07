@@ -55,3 +55,24 @@ func (r *pumpTruckRepo) Create(ctx context.Context, record *domain.PumpTruckReco
 	log.Printf("[Repo] 泵车记录创建成功 recordId=%s", *resp.Data.Record.RecordId)
 	return *resp.Data.Record.RecordId, nil
 }
+
+func (r *pumpTruckRepo) GetByID(ctx context.Context, recordID string) (*domain.PumpTruckRecord, error) {
+	log.Printf("[Repo] 读取泵车记录 table=%s recordId=%s", r.tableID, recordID)
+	req := larkbitable.NewGetAppTableRecordReqBuilder().
+		AppToken(r.appToken).
+		TableId(r.tableID).
+		RecordId(recordID).
+		Build()
+
+	resp, err := r.client.Bitable.AppTableRecord.Get(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("读取泵车记录失败: %w", err)
+	}
+	if !resp.Success() {
+		return nil, biterrors.NewAPIError(resp.Code, resp.Msg, resp.RequestId())
+	}
+
+	record := FieldMapToPumpTruck(resp.Data.Record.Fields, recordID)
+	log.Printf("[Repo] 泵车记录读取成功 recordId=%s", recordID)
+	return record, nil
+}

@@ -55,3 +55,24 @@ func (r *mixerTruckRepo) Create(ctx context.Context, record *domain.MixerTruckRe
 	log.Printf("[Repo] 搅拌车记录创建成功 recordId=%s", *resp.Data.Record.RecordId)
 	return *resp.Data.Record.RecordId, nil
 }
+
+func (r *mixerTruckRepo) GetByID(ctx context.Context, recordID string) (*domain.MixerTruckRecord, error) {
+	log.Printf("[Repo] 读取搅拌车记录 table=%s recordId=%s", r.tableID, recordID)
+	req := larkbitable.NewGetAppTableRecordReqBuilder().
+		AppToken(r.appToken).
+		TableId(r.tableID).
+		RecordId(recordID).
+		Build()
+
+	resp, err := r.client.Bitable.AppTableRecord.Get(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("读取搅拌车记录失败: %w", err)
+	}
+	if !resp.Success() {
+		return nil, biterrors.NewAPIError(resp.Code, resp.Msg, resp.RequestId())
+	}
+
+	record := FieldMapToMixerTruck(resp.Data.Record.Fields, recordID)
+	log.Printf("[Repo] 搅拌车记录读取成功 recordId=%s", recordID)
+	return record, nil
+}

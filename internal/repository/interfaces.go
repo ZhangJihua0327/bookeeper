@@ -10,12 +10,16 @@ import (
 type PumpTruckRepository interface {
 	// Create 创建泵车记录，返回记录 ID
 	Create(ctx context.Context, record *domain.PumpTruckRecord) (string, error)
+	// GetByID 根据记录 ID 读取泵车记录
+	GetByID(ctx context.Context, recordID string) (*domain.PumpTruckRecord, error)
 }
 
 // MixerTruckRepository 搅拌车数据操作接口
 type MixerTruckRepository interface {
 	// Create 创建搅拌车记录，返回记录 ID
 	Create(ctx context.Context, record *domain.MixerTruckRecord) (string, error)
+	// GetByID 根据记录 ID 读取搅拌车记录
+	GetByID(ctx context.Context, recordID string) (*domain.MixerTruckRecord, error)
 }
 
 // FieldOptionManager 字段选项管理接口

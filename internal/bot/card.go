@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	larkcard "github.com/larksuite/oapi-sdk-go/v3/card"
+	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	"github.com/zhangjihua0327/bookeeper/internal/domain"
 	"github.com/zhangjihua0327/bookeeper/internal/service"
 )
@@ -212,4 +213,24 @@ func structToMap(v interface{}) map[string]interface{} {
 	var m map[string]interface{}
 	json.Unmarshal(data, &m)
 	return m
+}
+
+// buildCardActionResponse 构建卡片回调响应（用于 OnP2CardActionTrigger）
+func buildCardActionResponse(title, content string, success bool) (*callback.CardActionTriggerResponse, error) {
+	cardJSON, err := buildResultCard(title, content, success)
+	if err != nil {
+		return nil, err
+	}
+
+	var cardData interface{}
+	if err := json.Unmarshal([]byte(cardJSON), &cardData); err != nil {
+		return nil, fmt.Errorf("反序列化卡片JSON失败: %w", err)
+	}
+
+	return &callback.CardActionTriggerResponse{
+		Card: &callback.Card{
+			Type: "raw",
+			Data: cardData,
+		},
+	}, nil
 }

@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"strings"
+	"sync"
+	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
@@ -35,13 +37,26 @@ type imageContent struct {
 type MessageHandler struct {
 	larkClient *lark.Client
 	session    *SessionManager
+	processed  sync.Map // messageId -> struct{}, 用于消息去重
 }
 
 // NewMessageHandler 创建消息处理器
 func NewMessageHandler(larkClient *lark.Client, session *SessionManager) *MessageHandler {
-	return &MessageHandler{
+	h := &MessageHandler{
 		larkClient: larkClient,
 		session:    session,
+	}
+	// 启动定期清理，防止内存泄漏
+	go h.cleanupLoop()
+	return h
+}
+
+// cleanupLoop 每5分钟清理一次已处理消息缓存
+func (h *MessageHandler) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		h.processed = sync.Map{}
 	}
 }
 
@@ -54,6 +69,13 @@ func (h *MessageHandler) Handle(ctx context.Context, event *larkim.P2MessageRece
 	}
 
 	messageId := *msg.MessageId
+
+	// 消息去重：飞书事件推送采用 at-least-once 机制，同一条消息可能推送多次
+	if _, loaded := h.processed.LoadOrStore(messageId, struct{}{}); loaded {
+		log.Printf("[Handler] 消息已处理过，跳过重复推送 messageId=%s", messageId)
+		return nil
+	}
+
 	chatId := ""
 	if msg.ChatId != nil {
 		chatId = *msg.ChatId
@@ -98,8 +120,15 @@ func (h *MessageHandler) handleText(ctx context.Context, chatId, messageId, rawC
 
 	log.Printf("[Handler] 处理文本消息 messageId=%s text=%q", messageId, text)
 
-	// 通过 AI 自动分类并处理
-	return h.session.HandleAutoClassify(ctx, chatId, messageId, text, "")
+	// 立即回复收到，避免飞书因超时（3秒）重新投递事件
+	h.session.ReplyText(ctx, messageId, "已收到，正在为您处理，请稍候...")
+
+	// 异步执行耗时的 AI 分类与处理，让事件处理函数尽快返回
+	go func() {
+		h.session.HandleAutoClassify(context.Background(), chatId, messageId, text, "")
+	}()
+
+	return nil
 }
 
 // handleImage 处理图片消息
