@@ -157,6 +157,34 @@ func (s *SessionManager) ConfirmMixerTruck(ctx context.Context, record *domain.M
 	return recordID, nil
 }
 
+// HandleAutoClassify 通过 AI 自动分类并处理记录
+func (s *SessionManager) HandleAutoClassify(ctx context.Context, chatId, messageId, text, imageURL string) error {
+	log.Printf("[Session] 开始AI自动分类 messageId=%s text=%q", messageId, text)
+
+	recordType, err := s.parsingSvc.ClassifyRecordType(ctx, service.ParseInput{
+		Text:     text,
+		ImageURL: imageURL,
+	})
+	if err != nil {
+		log.Printf("[Session] AI分类失败: messageId=%s err=%v", messageId, err)
+		s.ReplyText(ctx, messageId, fmt.Sprintf("分类失败: %v", err))
+		return nil
+	}
+
+	log.Printf("[Session] AI分类结果: messageId=%s type=%s", messageId, recordType)
+
+	switch recordType {
+	case "pump_truck":
+		return s.HandlePumpTruck(ctx, chatId, messageId, text, imageURL)
+	case "mixer_truck":
+		return s.HandleMixerTruck(ctx, chatId, messageId, text, imageURL)
+	default:
+		log.Printf("[Session] 无法识别记录类型 messageId=%s", messageId)
+		s.ReplyText(ctx, messageId, "无法识别记录类型，请描述泵车或搅拌车的施工记录。\n\n示例：\n- 泵车：今天33米去XX工地，客户恒大，15方，李师傅\n- 搅拌车：今天送XX工地50方混凝土，客户恒大，张三李四开车")
+		return nil
+	}
+}
+
 // ReplyText 回复纯文本消息
 func (s *SessionManager) ReplyText(ctx context.Context, messageId, text string) {
 	log.Printf("[Session] 回复文本消息 messageId=%s text=%q", messageId, text)

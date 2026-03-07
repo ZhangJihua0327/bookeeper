@@ -16,6 +16,17 @@ import (
 	"github.com/zhangjihua0327/bookeeper/internal/repository"
 )
 
+const classifySystemPrompt = `你是施工记录类型分类助手。请判断用户输入的内容属于哪种施工记录类型。
+
+类型说明：
+- pump_truck: 泵车记录。关键词包括泵车、臂架、米数（如33米、37米、47米、56米）、泵送等
+- mixer_truck: 搅拌车记录。关键词包括搅拌车、搅拌、混凝土运输等
+
+只返回 JSON，不要返回任何其他内容。格式如下：
+{"type": "pump_truck"} 或 {"type": "mixer_truck"}
+
+如果无法判断，返回 {"type": "unknown"}`
+
 const pumpTruckSystemPrompt = `你是泵车施工记录的数据提取助手。请从用户提供的文字或图片中提取以下字段，严格只返回 JSON，不要返回任何其他内容。
 
 字段说明（除备注外全部必填）：
@@ -406,4 +417,41 @@ func (s *ParsingService) checkOption(ctx context.Context, tableID, fieldName, va
 		FieldName: fieldName,
 		Value:     value,
 	}
+}
+
+// classifyJSON AI 分类响应的 JSON 结构
+type classifyJSON struct {
+	Type string `json:"type"`
+}
+
+// ClassifyRecordType 使用 AI 判断用户输入属于泵车记录还是搅拌车记录
+// 返回值: "pump_truck"、"mixer_truck" 或 "unknown"
+func (s *ParsingService) ClassifyRecordType(ctx context.Context, input ParseInput) (string, error) {
+	log.Printf("[Parsing] 开始分类记录类型 text=%q hasImage=%v", input.Text, input.ImageURL != "")
+	if input.Text == "" && input.ImageURL == "" {
+		return "unknown", nil
+	}
+
+	messages := buildMessages(classifySystemPrompt, input)
+
+	content, err := s.aiClient.ChatCompletion(ctx, ai.ChatRequest{
+		Model:    s.model,
+		Messages: messages,
+	})
+	if err != nil {
+		log.Printf("[Parsing] AI分类调用失败: err=%v", err)
+		return "", fmt.Errorf("调用 AI 模型分类失败: %w", err)
+	}
+
+	log.Printf("[Parsing] AI分类响应: content=%q", content)
+	jsonStr := extractJSON(content)
+
+	var result classifyJSON
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		log.Printf("[Parsing] 分类结果JSON解析失败: err=%v raw=%q", err, content)
+		return "unknown", nil
+	}
+
+	log.Printf("[Parsing] 分类结果: type=%s", result.Type)
+	return result.Type, nil
 }

@@ -21,18 +21,6 @@ const (
 	recordTypeMixerTruck recordType = "mixer_truck"
 )
 
-// 前缀匹配规则
-var prefixRules = []struct {
-	prefix string
-	typ    recordType
-}{
-	{"泵车:", recordTypePumpTruck},
-	{"泵:", recordTypePumpTruck},
-	{"搅拌车:", recordTypeMixerTruck},
-	{"搅拌:", recordTypeMixerTruck},
-	{"搅:", recordTypeMixerTruck},
-}
-
 // textContent 文本消息的 JSON 结构
 type textContent struct {
 	Text string `json:"text"`
@@ -110,29 +98,8 @@ func (h *MessageHandler) handleText(ctx context.Context, chatId, messageId, rawC
 
 	log.Printf("[Handler] 处理文本消息 messageId=%s text=%q", messageId, text)
 
-	// 前缀匹配
-	for _, rule := range prefixRules {
-		if strings.HasPrefix(text, rule.prefix) {
-			body := strings.TrimSpace(text[len(rule.prefix):])
-			log.Printf("[Handler] 匹配前缀 %q → 类型=%s messageId=%s", rule.prefix, rule.typ, messageId)
-			if body == "" {
-				log.Printf("[Handler] 前缀后内容为空 messageId=%s", messageId)
-				h.session.ReplyText(ctx, messageId, "请在前缀后输入记录内容")
-				return nil
-			}
-			switch rule.typ {
-			case recordTypePumpTruck:
-				return h.session.HandlePumpTruck(ctx, chatId, messageId, body, "")
-			case recordTypeMixerTruck:
-				return h.session.HandleMixerTruck(ctx, chatId, messageId, body, "")
-			}
-		}
-	}
-
-	// 无匹配前缀，提示用户
-	log.Printf("[Handler] 无匹配前缀，回复使用说明 messageId=%s", messageId)
-	h.session.ReplyText(ctx, messageId, "请使用以下前缀发送记录：\n- 泵: 或 泵车: — 泵车记录\n- 搅: 或 搅拌: 或 搅拌车: — 搅拌车记录\n\n示例：泵:今天33米去XX工地，客户恒大，15方，李师傅")
-	return nil
+	// 通过 AI 自动分类并处理
+	return h.session.HandleAutoClassify(ctx, chatId, messageId, text, "")
 }
 
 // handleImage 处理图片消息
@@ -190,15 +157,4 @@ func (h *MessageHandler) downloadImage(ctx context.Context, messageId, imageKey 
 
 	base64Str := "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
 	return base64Str, nil
-}
-
-// matchPrefix 检查文本是否匹配前缀，返回记录类型和去除前缀后的文本
-func matchPrefix(text string) (recordType, string, bool) {
-	for _, rule := range prefixRules {
-		if strings.HasPrefix(text, rule.prefix) {
-			body := strings.TrimSpace(text[len(rule.prefix):])
-			return rule.typ, body, true
-		}
-	}
-	return "", text, false
 }
