@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Feishu  FeishuConfig  `yaml:"feishu"`
 	Bitable BitableConfig `yaml:"bitable"`
+	Aliyun  AliyunConfig  `yaml:"aliyun"`
 }
 
 // FeishuConfig 飞书应用配置
@@ -24,6 +25,12 @@ type BitableConfig struct {
 	AppToken          string `yaml:"app_token"`
 	PumpTruckTableID  string `yaml:"pump_truck_table_id"`
 	MixerTruckTableID string `yaml:"mixer_truck_table_id"`
+}
+
+// AliyunConfig 阿里云配置
+type AliyunConfig struct {
+	APIKey string `yaml:"api_key"`
+	Model  string `yaml:"model"`
 }
 
 // Load 从指定路径的 YAML 文件加载配置
@@ -52,6 +59,8 @@ func (c *Config) validate() error {
 		"bitable.app_token":            c.Bitable.AppToken,
 		"bitable.pump_truck_table_id":  c.Bitable.PumpTruckTableID,
 		"bitable.mixer_truck_table_id": c.Bitable.MixerTruckTableID,
+		"aliyun.api_key":               c.Aliyun.APIKey,
+		"aliyun.model":                 c.Aliyun.Model,
 	}
 
 	for name, value := range required {

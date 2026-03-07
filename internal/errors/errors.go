@@ -49,3 +49,23 @@ type ErrConfigMissing struct {
 func (e *ErrConfigMissing) Error() string {
 	return fmt.Sprintf("缺少必要的配置: %s", e.Name)
 }
+
+// ErrAIParsingFailure AI 返回内容无法解析
+type ErrAIParsingFailure struct {
+	Reason      string
+	RawResponse string
+}
+
+func (e *ErrAIParsingFailure) Error() string {
+	return fmt.Sprintf("AI 解析失败: %s", e.Reason)
+}
+
+// ErrAIRequestFailure AI API 调用失败
+type ErrAIRequestFailure struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *ErrAIRequestFailure) Error() string {
+	return fmt.Sprintf("AI API 调用失败: status=%d, message=%s", e.StatusCode, e.Message)
+}
