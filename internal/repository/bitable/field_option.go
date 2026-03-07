@@ -3,6 +3,7 @@ package bitable
 import (
 	"context"
 	"fmt"
+	"log"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkbitable "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
@@ -27,6 +28,7 @@ func NewFieldOptionManager(client *lark.Client, appToken string) repository.Fiel
 }
 
 func (m *fieldOptionManager) GetFieldOptions(ctx context.Context, tableID string, fieldName string) ([]string, error) {
+	log.Printf("[Repo] 获取字段选项 table=%s field=%s", tableID, fieldName)
 	field, err := m.findField(ctx, tableID, fieldName)
 	if err != nil {
 		return nil, err
@@ -43,10 +45,12 @@ func (m *fieldOptionManager) GetFieldOptions(ctx context.Context, tableID string
 		}
 	}
 
+	log.Printf("[Repo] 获取字段选项成功 field=%s optionCount=%d", fieldName, len(options))
 	return options, nil
 }
 
 func (m *fieldOptionManager) AddFieldOption(ctx context.Context, tableID string, fieldName string, optionName string) error {
+	log.Printf("[Repo] 添加字段选项 table=%s field=%s option=%s", tableID, fieldName, optionName)
 	field, err := m.findField(ctx, tableID, fieldName)
 	if err != nil {
 		return err
@@ -62,6 +66,7 @@ func (m *fieldOptionManager) AddFieldOption(ctx context.Context, tableID string,
 		for _, opt := range field.Property.Options {
 			// 检查是否已存在同名选项
 			if opt.Name != nil && *opt.Name == optionName {
+				log.Printf("[Repo] 字段选项已存在，无需添加 field=%s option=%s", fieldName, optionName)
 				return nil // 选项已存在，无需重复添加
 			}
 			existingOptions = append(existingOptions, opt)
@@ -95,14 +100,17 @@ func (m *fieldOptionManager) AddFieldOption(ctx context.Context, tableID string,
 		return fmt.Errorf("更新字段 %q 选项失败: %w", fieldName, err)
 	}
 	if !resp.Success() {
+		log.Printf("[Repo] 添加字段选项API失败: field=%s option=%s code=%d msg=%s", fieldName, optionName, resp.Code, resp.Msg)
 		return biterrors.NewAPIError(resp.Code, resp.Msg, resp.RequestId())
 	}
 
+	log.Printf("[Repo] 添加字段选项成功 field=%s option=%s", fieldName, optionName)
 	return nil
 }
 
 // findField 在表的字段列表中查找指定名称的字段
 func (m *fieldOptionManager) findField(ctx context.Context, tableID string, fieldName string) (*larkbitable.AppTableFieldForList, error) {
+	log.Printf("[Repo] 查找字段 table=%s field=%s", tableID, fieldName)
 	var pageToken string
 	for {
 		builder := larkbitable.NewListAppTableFieldReqBuilder().

@@ -67,20 +67,24 @@ func NewParsingService(aiClient ai.AIClient, fieldOptionMgr repository.FieldOpti
 
 // ParsePumpTruck 解析用户输入为泵车记录
 func (s *ParsingService) ParsePumpTruck(ctx context.Context, input ParseInput) (*PumpTruckParseResult, error) {
+	log.Printf("[Parsing] 开始解析泵车记录 text=%q hasImage=%v model=%s", input.Text, input.ImageURL != "", s.model)
 	if input.Text == "" && input.ImageURL == "" {
 		return nil, fmt.Errorf("输入不能为空：文本和图片至少提供一个")
 	}
 
 	messages := buildMessages(pumpTruckSystemPrompt, input)
+	log.Printf("[Parsing] 调用AI模型解析泵车记录 messageCount=%d", len(messages))
 
 	content, err := s.aiClient.ChatCompletion(ctx, ai.ChatRequest{
 		Model:    s.model,
 		Messages: messages,
 	})
 	if err != nil {
+		log.Printf("[Parsing] AI模型调用失败(泵车): err=%v", err)
 		return nil, fmt.Errorf("调用 AI 模型失败: %w", err)
 	}
 
+	log.Printf("[Parsing] AI模型响应(泵车): content=%q", content)
 	jsonStr := extractJSON(content)
 
 	var parsed pumpTruckJSON
@@ -99,8 +103,13 @@ func (s *ParsingService) ParsePumpTruck(ctx context.Context, input ParseInput) (
 		}
 	}
 
+	log.Printf("[Parsing] 泵车记录解析成功: date=%v model=%s customer=%s volume=%.1f location=%s driver=%s",
+		record.Date.Format("2006-01-02"), record.TruckModel, record.CustomerName, record.Volume, record.Location, record.Driver)
+
 	unknownOpts := s.validatePumpTruckOptions(ctx, record)
 	missingFields := validatePumpTruckRequired(record)
+
+	log.Printf("[Parsing] 泵车校验完成: missingFields=%v unknownOptions=%d", missingFields, len(unknownOpts))
 
 	return &PumpTruckParseResult{
 		Record:         record,
@@ -111,20 +120,24 @@ func (s *ParsingService) ParsePumpTruck(ctx context.Context, input ParseInput) (
 
 // ParseMixerTruck 解析用户输入为搅拌车记录
 func (s *ParsingService) ParseMixerTruck(ctx context.Context, input ParseInput) (*MixerTruckParseResult, error) {
+	log.Printf("[Parsing] 开始解析搅拌车记录 text=%q hasImage=%v model=%s", input.Text, input.ImageURL != "", s.model)
 	if input.Text == "" && input.ImageURL == "" {
 		return nil, fmt.Errorf("输入不能为空：文本和图片至少提供一个")
 	}
 
 	messages := buildMessages(mixerTruckSystemPrompt, input)
+	log.Printf("[Parsing] 调用AI模型解析搅拌车记录 messageCount=%d", len(messages))
 
 	content, err := s.aiClient.ChatCompletion(ctx, ai.ChatRequest{
 		Model:    s.model,
 		Messages: messages,
 	})
 	if err != nil {
+		log.Printf("[Parsing] AI模型调用失败(搅拌车): err=%v", err)
 		return nil, fmt.Errorf("调用 AI 模型失败: %w", err)
 	}
 
+	log.Printf("[Parsing] AI模型响应(搅拌车): content=%q", content)
 	jsonStr := extractJSON(content)
 
 	var parsed mixerTruckJSON
@@ -143,8 +156,13 @@ func (s *ParsingService) ParseMixerTruck(ctx context.Context, input ParseInput) 
 		}
 	}
 
+	log.Printf("[Parsing] 搅拌车记录解析成功: date=%v customer=%s volume=%.1f location=%s drivers=%v",
+		record.Date.Format("2006-01-02"), record.CustomerName, record.Volume, record.Location, record.Drivers)
+
 	unknownOpts := s.validateMixerTruckOptions(ctx, record)
 	missingFields := validateMixerTruckRequired(record)
+
+	log.Printf("[Parsing] 搅拌车校验完成: missingFields=%v unknownOptions=%d", missingFields, len(unknownOpts))
 
 	return &MixerTruckParseResult{
 		Record:         record,
@@ -369,18 +387,21 @@ func validateMixerTruckRequired(record *domain.MixerTruckRecord) []string {
 // checkOption 检查单个字段值是否在选项列表中
 // 如果 GetFieldOptions 出错，跳过校验（记录日志），不阻断流程
 func (s *ParsingService) checkOption(ctx context.Context, tableID, fieldName, value string) *UnknownOption {
+	log.Printf("[Parsing] 校验字段选项 table=%s field=%s value=%s", tableID, fieldName, value)
 	options, err := s.fieldOptionMgr.GetFieldOptions(ctx, tableID, fieldName)
 	if err != nil {
-		log.Printf("警告: 获取字段 %q 选项列表失败，跳过校验: %v", fieldName, err)
+		log.Printf("[Parsing] 警告: 获取字段 %q 选项列表失败，跳过校验: %v", fieldName, err)
 		return nil
 	}
 
 	for _, opt := range options {
 		if opt == value {
+			log.Printf("[Parsing] 字段选项匹配成功 field=%s value=%s", fieldName, value)
 			return nil
 		}
 	}
 
+	log.Printf("[Parsing] 发现未知选项 field=%s value=%s", fieldName, value)
 	return &UnknownOption{
 		FieldName: fieldName,
 		Value:     value,

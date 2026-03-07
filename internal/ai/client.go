@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 
 	biterrors "github.com/zhangjihua0327/bookeeper/internal/errors"
@@ -110,6 +111,7 @@ type chatCompletionResponse struct {
 }
 
 func (c *dashScopeClient) ChatCompletion(ctx context.Context, req ChatRequest) (string, error) {
+	log.Printf("[AI] 开始调用DashScope model=%s messageCount=%d", req.Model, len(req.Messages))
 	body := chatCompletionRequest{
 		Model:       req.Model,
 		Messages:    req.Messages,
@@ -128,6 +130,8 @@ func (c *dashScopeClient) ChatCompletion(ctx context.Context, req ChatRequest) (
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
+	log.Printf("[AI] 发送HTTP请求 url=%s bodyLen=%d", c.baseURL+"/chat/completions", len(jsonBody))
+
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return "", &biterrors.ErrAIRequestFailure{
@@ -143,6 +147,7 @@ func (c *dashScopeClient) ChatCompletion(ctx context.Context, req ChatRequest) (
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("[AI] DashScope返回非200状态码: status=%d body=%s", resp.StatusCode, string(respBody))
 		return "", &biterrors.ErrAIRequestFailure{
 			StatusCode: resp.StatusCode,
 			Message:    string(respBody),
@@ -165,11 +170,13 @@ func (c *dashScopeClient) ChatCompletion(ctx context.Context, req ChatRequest) (
 	}
 
 	if len(result.Choices) == 0 {
+		log.Printf("[AI] DashScope响应中没有choices: body=%s", string(respBody))
 		return "", &biterrors.ErrAIParsingFailure{
 			Reason:      "API 响应中没有 choices",
 			RawResponse: string(respBody),
 		}
 	}
 
+	log.Printf("[AI] DashScope调用成功 responseLen=%d", len(result.Choices[0].Message.Content))
 	return result.Choices[0].Message.Content, nil
 }

@@ -3,6 +3,7 @@ package bitable
 import (
 	"context"
 	"fmt"
+	"log"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkbitable "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
@@ -30,6 +31,7 @@ func NewMixerTruckRepository(client *lark.Client, appToken, tableID string) repo
 }
 
 func (r *mixerTruckRepo) Create(ctx context.Context, record *domain.MixerTruckRecord) (string, error) {
+	log.Printf("[Repo] 创建搅拌车记录 table=%s customer=%s drivers=%v volume=%.1f", r.tableID, record.CustomerName, record.Drivers, record.Volume)
 	fields := MixerTruckToFieldMap(record)
 
 	req := larkbitable.NewCreateAppTableRecordReqBuilder().
@@ -42,11 +44,14 @@ func (r *mixerTruckRepo) Create(ctx context.Context, record *domain.MixerTruckRe
 
 	resp, err := r.client.Bitable.AppTableRecord.Create(ctx, req)
 	if err != nil {
+		log.Printf("[Repo] 创建搅拌车记录失败: table=%s err=%v", r.tableID, err)
 		return "", fmt.Errorf("创建搅拌车记录失败: %w", err)
 	}
 	if !resp.Success() {
+		log.Printf("[Repo] 创建搅拌车记录API失败: table=%s code=%d msg=%s requestId=%s", r.tableID, resp.Code, resp.Msg, resp.RequestId())
 		return "", biterrors.NewAPIError(resp.Code, resp.Msg, resp.RequestId())
 	}
 
+	log.Printf("[Repo] 搅拌车记录创建成功 recordId=%s", *resp.Data.Record.RecordId)
 	return *resp.Data.Record.RecordId, nil
 }

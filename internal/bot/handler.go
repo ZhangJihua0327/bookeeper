@@ -61,6 +61,7 @@ func NewMessageHandler(larkClient *lark.Client, session *SessionManager) *Messag
 func (h *MessageHandler) Handle(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 	msg := event.Event.Message
 	if msg == nil || msg.MessageId == nil {
+		log.Printf("[Handler] 收到无效消息事件（消息体或消息ID为空），跳过")
 		return nil
 	}
 
@@ -80,13 +81,15 @@ func (h *MessageHandler) Handle(ctx context.Context, event *larkim.P2MessageRece
 		content = *msg.Content
 	}
 
+	log.Printf("[Handler] 收到消息 messageId=%s chatId=%s type=%s", messageId, chatId, msgType)
+
 	switch msgType {
 	case "text":
 		return h.handleText(ctx, chatId, messageId, content)
 	case "image":
 		return h.handleImage(ctx, chatId, messageId, content)
 	default:
-		log.Printf("不支持的消息类型: %s", msgType)
+		log.Printf("[Handler] 不支持的消息类型: %s, messageId=%s", msgType, messageId)
 		return nil
 	}
 }
@@ -95,20 +98,25 @@ func (h *MessageHandler) Handle(ctx context.Context, event *larkim.P2MessageRece
 func (h *MessageHandler) handleText(ctx context.Context, chatId, messageId, rawContent string) error {
 	var tc textContent
 	if err := json.Unmarshal([]byte(rawContent), &tc); err != nil {
-		log.Printf("解析文本消息失败: %v", err)
+		log.Printf("[Handler] 解析文本消息JSON失败: messageId=%s err=%v", messageId, err)
 		return nil
 	}
 
 	text := strings.TrimSpace(tc.Text)
 	if text == "" {
+		log.Printf("[Handler] 文本内容为空，跳过 messageId=%s", messageId)
 		return nil
 	}
+
+	log.Printf("[Handler] 处理文本消息 messageId=%s text=%q", messageId, text)
 
 	// 前缀匹配
 	for _, rule := range prefixRules {
 		if strings.HasPrefix(text, rule.prefix) {
 			body := strings.TrimSpace(text[len(rule.prefix):])
+			log.Printf("[Handler] 匹配前缀 %q → 类型=%s messageId=%s", rule.prefix, rule.typ, messageId)
 			if body == "" {
+				log.Printf("[Handler] 前缀后内容为空 messageId=%s", messageId)
 				h.session.ReplyText(ctx, messageId, "请在前缀后输入记录内容")
 				return nil
 			}
@@ -122,6 +130,7 @@ func (h *MessageHandler) handleText(ctx context.Context, chatId, messageId, rawC
 	}
 
 	// 无匹配前缀，提示用户
+	log.Printf("[Handler] 无匹配前缀，回复使用说明 messageId=%s", messageId)
 	h.session.ReplyText(ctx, messageId, "请使用以下前缀发送记录：\n- 泵: 或 泵车: — 泵车记录\n- 搅: 或 搅拌: 或 搅拌车: — 搅拌车记录\n\n示例：泵:今天33米去XX工地，客户恒大，15方，李师傅")
 	return nil
 }
@@ -130,21 +139,26 @@ func (h *MessageHandler) handleText(ctx context.Context, chatId, messageId, rawC
 func (h *MessageHandler) handleImage(ctx context.Context, chatId, messageId, rawContent string) error {
 	var ic imageContent
 	if err := json.Unmarshal([]byte(rawContent), &ic); err != nil {
-		log.Printf("解析图片消息失败: %v", err)
+		log.Printf("[Handler] 解析图片消息JSON失败: messageId=%s err=%v", messageId, err)
 		return nil
 	}
 
 	if ic.ImageKey == "" {
+		log.Printf("[Handler] 图片消息缺少 image_key，跳过 messageId=%s", messageId)
 		return nil
 	}
+
+	log.Printf("[Handler] 处理图片消息 messageId=%s imageKey=%s", messageId, ic.ImageKey)
 
 	// 下载图片
 	imageBase64, err := h.downloadImage(ctx, messageId, ic.ImageKey)
 	if err != nil {
-		log.Printf("下载图片失败: %v", err)
+		log.Printf("[Handler] 下载图片失败: messageId=%s imageKey=%s err=%v", messageId, ic.ImageKey, err)
 		h.session.ReplyText(ctx, messageId, "图片下载失败，请重试")
 		return nil
 	}
+
+	log.Printf("[Handler] 图片下载成功 messageId=%s imageKey=%s dataLen=%d", messageId, ic.ImageKey, len(imageBase64))
 
 	// 图片消息无法确定类型，提示用户
 	h.session.ReplyText(ctx, messageId, "收到图片，请同时发送文本指定类型，格式：\n- 泵:（图片描述）\n- 搅:（图片描述）\n\n或直接回复此消息并附上类型前缀")
@@ -154,6 +168,7 @@ func (h *MessageHandler) handleImage(ctx context.Context, chatId, messageId, raw
 
 // downloadImage 下载飞书消息中的图片并转为 base64
 func (h *MessageHandler) downloadImage(ctx context.Context, messageId, imageKey string) (string, error) {
+	log.Printf("[Handler] 开始下载图片 messageId=%s imageKey=%s", messageId, imageKey)
 	req := larkim.NewGetMessageResourceReqBuilder().
 		MessageId(messageId).
 		FileKey(imageKey).
