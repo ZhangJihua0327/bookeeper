@@ -1,9 +1,9 @@
 # ---- 构建阶段 ----
-FROM registry.cn-hangzhou.aliyuncs.com/library/golang:1.24.13-alpine3.22 AS builder
+FROM golang:1.24.13-alpine3.22 AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
-ENV GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
 
 WORKDIR /src
 
