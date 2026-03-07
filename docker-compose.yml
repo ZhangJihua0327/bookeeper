@@ -6,7 +6,7 @@ services:
     container_name: bookeeper
     restart: unless-stopped
     ports:
-      - "9999:9999"
+      - "80:80"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     environment:
