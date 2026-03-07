@@ -12,6 +12,7 @@ type Config struct {
 	Feishu  FeishuConfig  `yaml:"feishu"`
 	Bitable BitableConfig `yaml:"bitable"`
 	Aliyun  AliyunConfig  `yaml:"aliyun"`
+	Bot     BotConfig     `yaml:"bot"`
 }
 
 // FeishuConfig 飞书应用配置
@@ -31,6 +32,11 @@ type BitableConfig struct {
 type AliyunConfig struct {
 	APIKey string `yaml:"api_key"`
 	Model  string `yaml:"model"`
+}
+
+// BotConfig 机器人配置
+type BotConfig struct {
+	CardCallbackPort int `yaml:"card_callback_port"`
 }
 
 // Load 从指定路径的 YAML 文件加载配置

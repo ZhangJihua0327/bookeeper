@@ -10,3 +10,6 @@ bitable:
 aliyun:
   api_key: your_dashscope_api_key
   model: qwen3.5-flash-2026-02-23
+
+bot:
+  card_callback_port: 9999
