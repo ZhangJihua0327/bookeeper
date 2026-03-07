@@ -29,6 +29,6 @@ WORKDIR /app
 
 COPY --from=builder /app/bookeeper .
 
-EXPOSE 9999
+EXPOSE 80
 
 ENTRYPOINT ["./bookeeper"]
