@@ -48,12 +48,6 @@ func buildPumpTruckConfirmCard(record *domain.PumpTruckRecord, unknownOpts []ser
 	if record.Location != "" {
 		lines = append(lines, fmt.Sprintf("**施工地点：** %s", record.Location))
 	}
-	if record.Driver != "" {
-		lines = append(lines, fmt.Sprintf("**驾驶员：** %s", record.Driver))
-	}
-	if record.Remark != "" {
-		lines = append(lines, fmt.Sprintf("**备注：** %s", record.Remark))
-	}
 
 	// 未知选项警告
 	if len(unknownOpts) > 0 {
@@ -128,9 +122,6 @@ func buildMixerTruckConfirmCard(record *domain.MixerTruckRecord, unknownOpts []s
 	}
 	if record.Volume != 0 {
 		lines = append(lines, fmt.Sprintf("**方量：** %.1f", record.Volume))
-	}
-	if record.Location != "" {
-		lines = append(lines, fmt.Sprintf("**施工地点：** %s", record.Location))
 	}
 	if len(record.Drivers) > 0 {
 		lines = append(lines, fmt.Sprintf("**驾驶员：** %s", strings.Join(record.Drivers, "、")))

@@ -8,7 +8,6 @@ type MixerTruckRecord struct {
 	Date         time.Time // 日期
 	CustomerName string    // 客户名称（单选）
 	Volume       float64   // 方量
-	Location     string    // 施工地点
-	Remark       string    // 备注
+	Remark       string    // 备注（如：驾驶员A：x + x + x，驾驶员B：x + x + x）
 	Drivers      []string  // 驾驶员（多选）
 }

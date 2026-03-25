@@ -115,7 +115,7 @@ func (s *SessionManager) HandleMixerTruck(ctx context.Context, chatId, messageId
 
 // ConfirmPumpTruck 确认提交泵车记录到多维表格，并回读写入的数据
 func (s *SessionManager) ConfirmPumpTruck(ctx context.Context, record *domain.PumpTruckRecord, unknownOpts []service.UnknownOption) (*domain.PumpTruckRecord, error) {
-	log.Printf("[Session] 开始确认提交泵车记录 customer=%s driver=%s volume=%.1f unknownOpts=%d", record.CustomerName, record.Driver, record.Volume, len(unknownOpts))
+	log.Printf("[Session] 开始确认提交泵车记录 customer=%s volume=%.1f unknownOpts=%d", record.CustomerName, record.Volume, len(unknownOpts))
 	// 先添加未知选项
 	for _, opt := range unknownOpts {
 		log.Printf("[Session] 添加泵车未知选项 field=%s value=%s", opt.FieldName, opt.Value)
@@ -198,7 +198,7 @@ func (s *SessionManager) HandleAutoClassify(ctx context.Context, chatId, message
 		return s.HandleMixerTruck(ctx, chatId, messageId, text, imageURL)
 	default:
 		log.Printf("[Session] 无法识别记录类型 messageId=%s", messageId)
-		s.ReplyText(ctx, messageId, "无法识别记录类型，请描述泵车或搅拌车的施工记录。\n\n示例：\n- 泵车：今天33米去XX工地，客户恒大，15方，李师傅\n- 搅拌车：今天送XX工地50方混凝土，客户恒大，张三李四开车")
+		s.ReplyText(ctx, messageId, "无法识别记录类型，请描述泵车或搅拌车的施工记录。\n\n示例：\n- 泵车：红泵车 恒大 XX工地 15方\n- 搅拌车：恒大 张三8+7+6 李四5+5")
 		return nil
 	}
 }

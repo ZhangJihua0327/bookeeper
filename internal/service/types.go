@@ -67,8 +67,6 @@ type pumpTruckJSON struct {
 	CustomerName *string  `json:"customer_name"`
 	Volume       *float64 `json:"volume"`
 	Location     *string  `json:"location"`
-	Remark       *string  `json:"remark"`
-	Driver       *string  `json:"driver"`
 }
 
 // mixerTruckJSON AI 返回的搅拌车 JSON 中间结构体
@@ -76,7 +74,6 @@ type mixerTruckJSON struct {
 	Date         *string  `json:"date"`
 	CustomerName *string  `json:"customer_name"`
 	Volume       *float64 `json:"volume"`
-	Location     *string  `json:"location"`
 	Remark       *string  `json:"remark"`
 	Drivers      []string `json:"drivers"`
 }

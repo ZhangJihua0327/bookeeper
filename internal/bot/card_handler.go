@@ -78,7 +78,7 @@ func (h *CardCallbackHandler) confirmPumpTruck(ctx context.Context, recordJSON s
 		return buildCardActionResponse("提交失败", fmt.Sprintf("数据解析错误: %v", err), false)
 	}
 
-	log.Printf("[CardHandler] 提交泵车记录 customer=%s driver=%s volume=%.1f", record.CustomerName, record.Driver, record.Volume)
+	log.Printf("[CardHandler] 提交泵车记录 customer=%s volume=%.1f", record.CustomerName, record.Volume)
 	written, err := h.session.ConfirmPumpTruck(ctx, &record, unknownOpts)
 	if err != nil {
 		log.Printf("[CardHandler] 提交泵车记录失败: err=%v", err)
@@ -130,12 +130,6 @@ func formatPumpTruckWrittenData(record *domain.PumpTruckRecord) string {
 	if record.Location != "" {
 		lines = append(lines, fmt.Sprintf("**施工地点：** %s", record.Location))
 	}
-	if record.Driver != "" {
-		lines = append(lines, fmt.Sprintf("**驾驶员：** %s", record.Driver))
-	}
-	if record.Remark != "" {
-		lines = append(lines, fmt.Sprintf("**备注：** %s", record.Remark))
-	}
 	return strings.Join(lines, "\n")
 }
 
@@ -152,9 +146,6 @@ func formatMixerTruckWrittenData(record *domain.MixerTruckRecord) string {
 	}
 	if record.Volume != 0 {
 		lines = append(lines, fmt.Sprintf("**方量：** %.1f", record.Volume))
-	}
-	if record.Location != "" {
-		lines = append(lines, fmt.Sprintf("**施工地点：** %s", record.Location))
 	}
 	if len(record.Drivers) > 0 {
 		lines = append(lines, fmt.Sprintf("**驾驶员：** %s", strings.Join(record.Drivers, "、")))

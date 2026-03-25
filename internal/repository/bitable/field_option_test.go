@@ -22,7 +22,7 @@ func TestGetAllSelectFieldOptions(t *testing.T) {
 	ctx := context.Background()
 
 	// 泵车表的单选字段
-	pumpSelectFields := []string{"车型", "客户名称", "驾驶员"}
+	pumpSelectFields := []string{"车型", "客户名称"}
 	// 搅拌车表的单选/多选字段
 	mixerSelectFields := []string{"客户名称", "驾驶员"}
 
@@ -64,7 +64,6 @@ func TestCreatePumpTruckRecord(t *testing.T) {
 		CustomerName: "顾青松",
 		Volume:       13.0,
 		Location:     "李世华",
-		Driver:       "姜",
 	}
 
 	recordID, err := repo.Create(ctx, record)

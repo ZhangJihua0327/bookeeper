@@ -31,7 +31,7 @@ func NewPumpTruckRepository(client *lark.Client, appToken, tableID string) repos
 }
 
 func (r *pumpTruckRepo) Create(ctx context.Context, record *domain.PumpTruckRecord) (string, error) {
-	log.Printf("[Repo] 创建泵车记录 table=%s customer=%s driver=%s volume=%.1f", r.tableID, record.CustomerName, record.Driver, record.Volume)
+	log.Printf("[Repo] 创建泵车记录 table=%s customer=%s volume=%.1f", r.tableID, record.CustomerName, record.Volume)
 	fields := PumpTruckToFieldMap(record)
 
 	req := larkbitable.NewCreateAppTableRecordReqBuilder().

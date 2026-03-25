@@ -10,6 +10,4 @@ type PumpTruckRecord struct {
 	CustomerName string    // 客户名称（单选）
 	Volume       float64   // 方量
 	Location     string    // 施工地点
-	Remark       string    // 备注
-	Driver       string    // 驾驶员（单选）
 }

@@ -37,12 +37,6 @@ func PumpTruckToFieldMap(record *domain.PumpTruckRecord) map[string]interface{} 
 	if record.Location != "" {
 		fields[FieldLocation] = record.Location
 	}
-	if record.Remark != "" {
-		fields[FieldRemark] = record.Remark
-	}
-	if record.Driver != "" {
-		fields[FieldDriver] = record.Driver
-	}
 
 	return fields
 }
@@ -59,9 +53,6 @@ func MixerTruckToFieldMap(record *domain.MixerTruckRecord) map[string]interface{
 	}
 	if record.Volume != 0 {
 		fields[FieldVolume] = record.Volume
-	}
-	if record.Location != "" {
-		fields[FieldLocation] = record.Location
 	}
 	if record.Remark != "" {
 		fields[FieldRemark] = record.Remark
@@ -92,12 +83,6 @@ func FieldMapToPumpTruck(fields map[string]interface{}, recordID string) *domain
 	if v, ok := fields[FieldLocation]; ok {
 		record.Location = parseStringField(v)
 	}
-	if v, ok := fields[FieldDriver]; ok {
-		record.Driver = parseStringField(v)
-	}
-	if v, ok := fields[FieldRemark]; ok {
-		record.Remark = parseStringField(v)
-	}
 
 	return record
 }
@@ -114,9 +99,6 @@ func FieldMapToMixerTruck(fields map[string]interface{}, recordID string) *domai
 	}
 	if v, ok := fields[FieldVolume]; ok {
 		record.Volume = parseFloatField(v)
-	}
-	if v, ok := fields[FieldLocation]; ok {
-		record.Location = parseStringField(v)
 	}
 	if v, ok := fields[FieldRemark]; ok {
 		record.Remark = parseStringField(v)
