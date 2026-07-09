@@ -1,0 +1,357 @@
+﻿:root {
+  --ink: #1f2924;
+  --muted: #68746f;
+  --line: #d9dfdc;
+  --paper: #f7f8f6;
+  --panel: #ffffff;
+  --accent: #176f5b;
+  --accent-dark: #0d4d40;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  width: min(900px, calc(100% - 28px));
+  margin: 0 auto;
+  padding: 14px 0 32px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0 14px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.2;
+}
+
+h1 {
+  flex: 0 0 auto;
+  font-size: 26px;
+  font-weight: 800;
+}
+
+h2 {
+  font-size: 19px;
+}
+
+h3 {
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 0 1 280px;
+  min-width: 200px;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.tab {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-dark);
+  cursor: pointer;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+.report-strip {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.report-strip input {
+  width: 160px;
+}
+
+.details,
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.form-panel,
+.details > div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 14px;
+}
+
+.form-panel h2 {
+  margin-bottom: 12px;
+}
+
+.entry-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wide,
+.entry-form button {
+  grid-column: 1 / -1;
+}
+
+input,
+textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid #cbd3cf;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  padding: 10px 11px;
+  outline: none;
+}
+
+textarea {
+  resize: vertical;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(23, 111, 91, 0.12);
+}
+
+button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 10px 13px;
+}
+
+button:hover {
+  background: var(--accent-dark);
+}
+
+.table-wrap {
+  width: 100%;
+  overflow-x: visible;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.report-table th,
+.report-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-table th {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  background: #f8faf8;
+}
+
+.report-table td:nth-child(3) {
+  white-space: nowrap;
+}
+
+.empty-cell {
+  color: var(--muted);
+  text-align: center !important;
+}
+
+pre {
+  min-height: 220px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  border: 1px solid #d8dfd9;
+  border-radius: 6px;
+  background: #1f2924;
+  color: #f4fbf6;
+  padding: 12px;
+  line-height: 1.6;
+}
+
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  max-width: min(420px, calc(100% - 32px));
+  transform: translateY(120%);
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  padding: 12px 14px;
+  transition: transform 180ms ease;
+  z-index: 10;
+}
+
+.toast.show {
+  transform: translateY(0);
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100% - 16px, 900px);
+    padding-top: 10px;
+  }
+
+  .topbar {
+    gap: 8px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  h2 {
+    font-size: 18px;
+  }
+
+  .tabs {
+    min-width: 174px;
+    flex-basis: 190px;
+  }
+
+  .tab {
+    min-height: 36px;
+    font-size: 14px;
+  }
+
+  .report-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .report-strip input {
+    width: 100%;
+  }
+
+  .entry-form {
+    grid-template-columns: 1fr;
+  }
+
+  .form-panel,
+  .details > div {
+    padding: 12px;
+  }
+
+  .report-table,
+  .report-table thead,
+  .report-table tbody,
+  .report-table tr,
+  .report-table th,
+  .report-table td {
+    display: block;
+  }
+
+  .report-table thead {
+    display: none;
+  }
+
+  .report-table tr {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    background: #fff;
+  }
+
+  .report-table td {
+    display: grid;
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 8px;
+    border: 0;
+    padding: 6px 0;
+  }
+
+  .report-table td::before {
+    color: var(--muted);
+    font-weight: 800;
+  }
+
+    .pump-table td:nth-child(1)::before,
+  .mixer-table td:nth-child(1)::before { content: "客户名称"; }
+  .pump-table td:nth-child(2)::before { content: "车型"; }
+  .pump-table td:nth-child(3)::before,
+  .mixer-table td:nth-child(2)::before { content: "方量"; }
+  .pump-table td:nth-child(4)::before { content: "施工地点"; }
+  .mixer-table td:nth-child(3)::before { content: "驾驶员"; }
+  .mixer-table td:nth-child(4)::before { content: "备注"; }
+
+  .empty-cell {
+    display: block !important;
+    text-align: center !important;
+  }
+
+  .empty-cell::before {
+    content: "" !important;
+  }
+
+  pre {
+    min-height: 180px;
+    font-size: 13px;
+  }
+}
+

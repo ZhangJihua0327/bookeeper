@@ -1,0 +1,14 @@
+﻿{
+  "name": "bookeeper",
+  "version": "1.0.0",
+  "description": "Feishu Bitable vehicle bookkeeping app",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && node dist/server/index.js",
+    "check": "node scripts/build.mjs && node --check dist/server/index.js && node --check dist/server/config.js && node --check dist/server/feishu.js && node --check dist/server/report.js && node --check dist/public/app.js"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

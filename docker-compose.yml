@@ -1,13 +1,15 @@
-services:
+﻿services:
   bookeeper:
     build:
       context: .
       dockerfile: Dockerfile
+    image: bookeeper:node-lts-alpine
     container_name: bookeeper
     restart: unless-stopped
     ports:
       - "80:80"
-    volumes:
-      - ./config.yaml:/app/config.yaml:ro
+    env_file:
+      - .env
     environment:
-      - TZ=Asia/Shanghai
+      PORT: "80"
+      TZ: Asia/Shanghai

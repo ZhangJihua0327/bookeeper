@@ -1,0 +1,11 @@
+﻿.git
+.env
+.env.local
+node_modules
+dist
+coverage
+*.log
+bookeeper-server*.log
+.qoder
+.vscode
+.idea

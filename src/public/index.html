@@ -1,0 +1,104 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>记账台</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <h1>记账台</h1>
+        <nav class="tabs" aria-label="工作区">
+          <button class="tab active" type="button" data-tab="reportPanel">昨日报表</button>
+          <button class="tab" type="button" data-tab="entryPanel">新增记账</button>
+        </nav>
+      </header>
+
+      <section id="reportPanel" class="tab-panel active">
+        <div class="report-strip">
+          <h2>昨日作业内容报表</h2>
+          <input id="reportDate" type="date" aria-label="报表日期">
+        </div>
+
+        <section class="details">
+          <div>
+            <h3>泵车明细</h3>
+            <div class="table-wrap">
+              <table class="report-table pump-table">
+                <thead>
+                  <tr>
+                    <th>客户名称</th>
+                    <th>车型</th>
+                    <th>方量</th>
+                    <th>施工地点</th>
+                  </tr>
+                </thead>
+                <tbody id="pumpReportDetails"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <h3>搅拌车明细</h3>
+            <div class="table-wrap">
+              <table class="report-table mixer-table">
+                <thead>
+                  <tr>
+                    <th>客户名称</th>
+                    <th>方量</th>
+                    <th>驾驶员</th>
+                    <th>备注</th>
+                  </tr>
+                </thead>
+                <tbody id="mixerReportDetails"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <h3>报表文本</h3>
+            <pre id="reportText"></pre>
+          </div>
+        </section>
+      </section>
+
+      <section id="entryPanel" class="tab-panel">
+        <section class="workspace">
+          <div class="form-panel">
+            <h2>泵车表单</h2>
+            <form id="pumpForm" class="entry-form">
+              <label>日期<input name="date" type="date" required></label>
+              <label>车型<input name="truckModel" list="pumpTruckModelOptions" required placeholder="例如：33 米泵车"></label>
+              <label>客户名称<input name="customerName" list="pumpCustomerOptions" required></label>
+              <label>方量<input name="volume" type="number" inputmode="decimal" min="0" step="0.01" required></label>
+              <label class="wide">施工地点<input name="location" required></label>
+              <button type="submit">提交泵车记录</button>
+            </form>
+          </div>
+
+          <div class="form-panel">
+            <h2>搅拌车表单</h2>
+            <form id="mixerForm" class="entry-form">
+              <label>日期<input name="date" type="date" required></label>
+              <label>客户名称<input name="customerName" list="mixerCustomerOptions" required></label>
+              <label>方量<input name="volume" type="number" inputmode="decimal" min="0" step="0.01" required></label>
+              <label>驾驶员<input name="drivers" list="driverOptions" required placeholder="张三、李四"></label>
+              <label class="wide">备注<textarea name="remark" rows="3" required placeholder="例如：张三 12 方，李四 18 方"></textarea></label>
+              <button type="submit">提交搅拌车记录</button>
+            </form>
+          </div>
+        </section>
+      </section>
+
+      <datalist id="pumpTruckModelOptions"></datalist>
+      <datalist id="pumpCustomerOptions"></datalist>
+      <datalist id="mixerCustomerOptions"></datalist>
+      <datalist id="driverOptions"></datalist>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
