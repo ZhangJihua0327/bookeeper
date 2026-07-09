@@ -23,15 +23,30 @@ jobs:
 
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          BOOKEEPER_ENV: ${{ secrets.BOOKEEPER_ENV }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ steps.ssh.outputs.port }}
+          envs: BOOKEEPER_ENV
           script_stop: true
           script: |
+            set -eu
+            mkdir -p "${{ secrets.DEPLOY_PATH }}"
             cd "${{ secrets.DEPLOY_PATH }}"
-            git fetch --all --prune
+            if [ ! -d .git ]; then
+              git init
+              git remote add origin "git@github.com:${{ github.repository }}.git"
+            else
+              git remote set-url origin "git@github.com:${{ github.repository }}.git"
+            fi
+            git fetch origin "${{ github.ref_name }}" --prune
             git reset --hard "origin/${{ github.ref_name }}"
+            if [ -n "${BOOKEEPER_ENV:-}" ]; then
+              printf '%s\n' "$BOOKEEPER_ENV" > .env
+              chmod 600 .env
+            fi
             chmod +x scripts/deploy.sh scripts/init-https.sh scripts/renew-https.sh
             ./scripts/deploy.sh
