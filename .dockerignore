@@ -9,3 +9,6 @@ bookeeper-server*.log
 .qoder
 .vscode
 .idea
+certbot/conf
+certbot/www
+nginx/conf.d/default.conf

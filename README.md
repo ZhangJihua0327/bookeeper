@@ -56,6 +56,47 @@ docker compose up -d
 启动后访问 http://localhost/。容器内 PORT=80，宿主机端口映射为 80:80。
 
 
+
+## HTTPS / Nginx
+
+生产环境域名：`bookeeper.lollipopzzz.cn`。
+
+DNS 先把 `bookeeper.lollipopzzz.cn` 的 A 记录解析到云服务器公网 IP，并确认服务器安全组开放 80 和 443。
+
+首次签发证书并启用 HTTPS：
+
+```bash
+cd /opt/bookeeper
+cp .env.example .env
+# 编辑 .env，填入飞书配置
+export CERTBOT_EMAIL=Zhangjihua0327@outlook.com
+sh scripts/init-https.sh
+```
+
+脚本流程：
+
+1. nginx 先用 HTTP 配置启动，代理应用并暴露 `/.well-known/acme-challenge/`。
+2. `certbot/certbot:latest` 使用 webroot 方式签发 `bookeeper.lollipopzzz.cn` 证书。
+3. 签发成功后切换到 HTTPS nginx 配置，并把 80 重定向到 443。
+
+续期证书：
+
+```bash
+cd /opt/bookeeper
+sh scripts/renew-https.sh
+```
+
+建议添加服务器 crontab：
+
+```cron
+0 3 * * 1 cd /opt/bookeeper && sh scripts/renew-https.sh >> certbot-renew.log 2>&1
+```
+
+当前 `docker-compose.yml` 使用：
+
+- `bookeeper`：内部监听 3000
+- `nginx:stable-alpine3.23-perl`：公网 80/443
+- `certbot/certbot:latest`：签发和续期证书
 ## GitHub 自动部署
 
 服务器准备：
@@ -86,6 +127,8 @@ GitHub 仓库添加 Actions Secrets：
 - GET /api/health：检查配置和字段映射
 - GET /api/options：读取飞书字段下拉选项
 - POST /api/options：新增字段下拉选项
+
+
 
 
 

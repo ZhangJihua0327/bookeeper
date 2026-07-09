@@ -14,3 +14,7 @@ pnpm-debug.log*
 dist/
 coverage/
 *.log
+certbot/conf/
+certbot/www/
+nginx/conf.d/default.conf
+certbot-renew.log
