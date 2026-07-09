@@ -1,4 +1,4 @@
-﻿import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,7 @@ import {
   validatePumpTruck,
   type MixerTruckInput,
   type PumpTruckInput,
+  type VehicleReport,
 } from "./report.js";
 
 interface RouteContext {
@@ -39,6 +40,12 @@ interface AddOptionInput {
 
 type RouteHandler = (ctx: RouteContext) => Promise<void>;
 
+interface ReportCacheEntry {
+  expiresAt: number;
+  report?: VehicleReport;
+  pending?: Promise<VehicleReport>;
+}
+
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
 const missingConfig = getMissingConfig();
 
@@ -48,6 +55,9 @@ const feishu = new FeishuBitableClient({
   appToken: config.bitable.appToken,
   baseUrl: config.feishu.baseUrl,
 });
+
+const reportCache = new Map<string, ReportCacheEntry>();
+const reportCacheTtlMs = 5 * 60 * 1000;
 
 const routes: Record<string, RouteHandler> = {
   "GET /api/health": handleHealth,
@@ -114,7 +124,7 @@ async function handleCreatePumpTruck({ req, res }: RouteContext): Promise<void> 
   const input = await readJson<CreatePumpTruckInput>(req);
   const errors = validatePumpTruck(input);
   if (errors.length) {
-    sendJson(res, 400, { error: "泵车表单校验失败", details: errors });
+    sendJson(res, 400, { error: "Pump truck form validation failed", details: errors });
     return;
   }
 
@@ -125,6 +135,7 @@ async function handleCreatePumpTruck({ req, res }: RouteContext): Promise<void> 
 
   const fields = makePumpTruckFields(input, config.bitable.fields.pumpTruck);
   const record = await feishu.createRecord(config.bitable.pumpTruckTableId, fields);
+  invalidateReportCache(input.date);
   sendJson(res, 201, { record, fields, addedOptions });
 }
 
@@ -133,7 +144,7 @@ async function handleCreateMixerTruck({ req, res }: RouteContext): Promise<void>
   const input = await readJson<CreateMixerTruckInput>(req);
   const errors = validateMixerTruck(input);
   if (errors.length) {
-    sendJson(res, 400, { error: "搅拌车表单校验失败", details: errors });
+    sendJson(res, 400, { error: "Mixer truck form validation failed", details: errors });
     return;
   }
 
@@ -144,26 +155,60 @@ async function handleCreateMixerTruck({ req, res }: RouteContext): Promise<void>
 
   const fields = makeMixerTruckFields(input, config.bitable.fields.mixerTruck);
   const record = await feishu.createRecord(config.bitable.mixerTruckTableId, fields);
+  invalidateReportCache(input.date);
   sendJson(res, 201, { record, fields, addedOptions });
 }
 
 async function handleYesterdayReport({ res, url }: RouteContext): Promise<void> {
   ensureConfigured();
-  const date = url.searchParams.get("date") || getYesterdayDate(config.timeZone);
+  const yesterday = getYesterdayDate(config.timeZone);
+  const date = url.searchParams.get("date") || yesterday;
+  const forceRefresh = url.searchParams.get("refresh") === "1";
+  const report = date === yesterday
+    ? await getCachedReport(date, forceRefresh)
+    : await buildReportForDate(date);
+  sendJson(res, 200, report);
+}
+
+async function getCachedReport(date: string, forceRefresh: boolean): Promise<VehicleReport> {
+  const now = Date.now();
+  const cached = reportCache.get(date);
+  if (!forceRefresh && cached) {
+    if (cached.report && cached.expiresAt > now) return cached.report;
+    if (cached.pending) return cached.pending;
+  }
+
+  const pending = buildReportForDate(date)
+    .then((report) => {
+      reportCache.set(date, { report, expiresAt: Date.now() + reportCacheTtlMs });
+      return report;
+    })
+    .catch((error) => {
+      reportCache.delete(date);
+      throw error;
+    });
+
+  reportCache.set(date, { pending, expiresAt: now + reportCacheTtlMs });
+  return pending;
+}
+
+async function buildReportForDate(date: string): Promise<VehicleReport> {
   const [pumpRecords, mixerRecords] = await Promise.all([
     feishu.listRecords(config.bitable.pumpTruckTableId),
     feishu.listRecords(config.bitable.mixerTruckTableId),
   ]);
 
-  const report = buildYesterdayReport({
+  return buildYesterdayReport({
     date,
     pumpRecords,
     mixerRecords,
     fields: config.bitable.fields,
     timeZone: config.timeZone,
   });
+}
 
-  sendJson(res, 200, report);
+function invalidateReportCache(date: string): void {
+  reportCache.delete(date);
 }
 
 async function handleRecentRecords({ res }: RouteContext): Promise<void> {
@@ -220,7 +265,7 @@ function optionTarget(table: AddOptionInput["table"], field: string): { tableId:
   const tableConfig = allowed[table];
   const fieldName = tableConfig?.fields[field as keyof typeof tableConfig.fields];
   if (!tableConfig || !fieldName) {
-    throw new HttpError(400, "不支持的字段选项", { table, field });
+    throw new HttpError(400, "Unsupported field option", { table, field });
   }
   return { tableId: tableConfig.tableId, fieldName };
 }

@@ -1,4 +1,4 @@
-﻿interface OptionSets {
+interface OptionSets {
   pumpTruck: {
     truckModel: string[];
     customerName: string[];

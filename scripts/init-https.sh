@@ -1,4 +1,4 @@
-﻿#!/bin/sh
+#!/bin/sh
 set -eu
 
 DOMAIN="${DOMAIN:-bookeeper.lollipopzzz.cn}"
@@ -18,5 +18,4 @@ docker compose run --rm certbot certonly \
   -d "$DOMAIN"
 
 cp nginx/conf.d/bookeeper.https.conf nginx/conf.d/default.conf
-docker compose up -d nginx
-
+docker compose up -d --force-recreate nginx

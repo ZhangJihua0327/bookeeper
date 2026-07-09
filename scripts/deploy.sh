@@ -1,8 +1,13 @@
 #!/bin/sh
 set -eu
 
+if [ -f "$HOME/.bookeeper_env" ]; then
+  cp "$HOME/.bookeeper_env" .env
+  chmod 600 .env
+fi
+
 if [ ! -f .env ]; then
-  echo "Missing .env in $(pwd). Create it from .env.example before deploy." >&2
+  echo "Missing .env in $(pwd). Create $HOME/.bookeeper_env or .env before deploy." >&2
   exit 1
 fi
 
@@ -14,3 +19,4 @@ fi
 
 docker compose build
 docker compose up -d --remove-orphans
+docker compose up -d --force-recreate nginx

@@ -21,32 +21,17 @@ jobs:
         env:
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
 
-      - name: Prepare SSH key
+      - name: Prepare SSH
         env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ steps.ssh.outputs.port }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -eu
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-
-      - name: Write environment file
-        env:
-          BOOKEEPER_ENV: ${{ secrets.BOOKEEPER_ENV }}
-        run: |
-          set -eu
-          printf '%s\n' "$BOOKEEPER_ENV" > /tmp/bookeeper.env
-          chmod 600 /tmp/bookeeper.env
-
-      - name: Upload environment file
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ steps.ssh.outputs.port }}
-        run: |
-          set -eu
           ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-          scp -P "$DEPLOY_PORT" -i ~/.ssh/deploy_key /tmp/bookeeper.env "$DEPLOY_USER@$DEPLOY_HOST:/tmp/bookeeper.env"
 
       - name: Deploy over SSH
         env:
@@ -70,7 +55,5 @@ jobs:
              fi
              git fetch origin '$DEPLOY_BRANCH' --prune
              git reset --hard 'origin/$DEPLOY_BRANCH'
-             mv /tmp/bookeeper.env .env
-             chmod 600 .env
              chmod +x scripts/deploy.sh scripts/init-https.sh scripts/renew-https.sh
              ./scripts/deploy.sh"
