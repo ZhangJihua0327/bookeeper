@@ -11,7 +11,7 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-if [ -f certbot/conf/live/bookeeper.lollipopzzz.cn/fullchain.pem ]; then
+if docker compose run --rm --entrypoint sh certbot -c 'test -f /etc/letsencrypt/live/bookeeper.lollipopzzz.cn/fullchain.pem'; then
   cp nginx/conf.d/bookeeper.https.conf nginx/conf.d/default.conf
 else
   cp nginx/conf.d/bookeeper.http.conf nginx/conf.d/default.conf
