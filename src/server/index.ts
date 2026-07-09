@@ -124,7 +124,7 @@ async function handleCreatePumpTruck({ req, res }: RouteContext): Promise<void> 
   const input = await readJson<CreatePumpTruckInput>(req);
   const errors = validatePumpTruck(input);
   if (errors.length) {
-    sendJson(res, 400, { error: "Pump truck form validation failed", details: errors });
+    sendJson(res, 400, { error: "泵车表单校验失败", details: errors });
     return;
   }
 
@@ -144,7 +144,7 @@ async function handleCreateMixerTruck({ req, res }: RouteContext): Promise<void>
   const input = await readJson<CreateMixerTruckInput>(req);
   const errors = validateMixerTruck(input);
   if (errors.length) {
-    sendJson(res, 400, { error: "Mixer truck form validation failed", details: errors });
+    sendJson(res, 400, { error: "搅拌车表单校验失败", details: errors });
     return;
   }
 
@@ -265,7 +265,7 @@ function optionTarget(table: AddOptionInput["table"], field: string): { tableId:
   const tableConfig = allowed[table];
   const fieldName = tableConfig?.fields[field as keyof typeof tableConfig.fields];
   if (!tableConfig || !fieldName) {
-    throw new HttpError(400, "Unsupported field option", { table, field });
+    throw new HttpError(400, "不支持的字段选项", { table, field });
   }
   return { tableId: tableConfig.tableId, fieldName };
 }

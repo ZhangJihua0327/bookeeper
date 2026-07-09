@@ -174,22 +174,22 @@ export function makeMixerTruckFields(input: MixerTruckInput, fieldNames: MixerTr
 
 export function validatePumpTruck(input: Partial<PumpTruckInput>): string[] {
   const errors: string[] = [];
-  if (!isDateString(input.date)) errors.push("\u65e5\u671f\u4e0d\u80fd\u4e3a\u7a7a");
-  if (!trimmed(input.truckModel)) errors.push("\u8f66\u578b\u4e0d\u80fd\u4e3a\u7a7a");
-  if (!trimmed(input.customerName)) errors.push("\u5ba2\u6237\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a");
-  if (!positiveNumber(input.volume)) errors.push("\u65b9\u91cf\u5fc5\u987b\u5927\u4e8e 0");
-  if (!trimmed(input.location)) errors.push("\u65bd\u5de5\u5730\u70b9\u4e0d\u80fd\u4e3a\u7a7a");
+  if (!isDateString(input.date)) errors.push("日期不能为空");
+  if (!trimmed(input.truckModel)) errors.push("车型不能为空");
+  if (!trimmed(input.customerName)) errors.push("客户名称不能为空");
+  if (!positiveNumber(input.volume)) errors.push("方量必须大于 0");
+  if (!trimmed(input.location)) errors.push("施工地点不能为空");
   return errors;
 }
 
 export function validateMixerTruck(input: Partial<MixerTruckInput>): string[] {
   const errors: string[] = [];
-  if (!isDateString(input.date)) errors.push("\u65e5\u671f\u4e0d\u80fd\u4e3a\u7a7a");
-  if (!trimmed(input.customerName)) errors.push("\u5ba2\u6237\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a");
-  if (!positiveNumber(input.volume)) errors.push("\u65b9\u91cf\u5fc5\u987b\u5927\u4e8e 0");
-  if (!trimmed(input.remark)) errors.push("\u5907\u6ce8\u4e0d\u80fd\u4e3a\u7a7a");
+  if (!isDateString(input.date)) errors.push("日期不能为空");
+  if (!trimmed(input.customerName)) errors.push("客户名称不能为空");
+  if (!positiveNumber(input.volume)) errors.push("方量必须大于 0");
+  if (!trimmed(input.remark)) errors.push("备注不能为空");
   if (!Array.isArray(input.drivers) || input.drivers.map((name) => name.trim()).filter(Boolean).length === 0) {
-    errors.push("\u9a7e\u9a76\u5458\u81f3\u5c11\u9009\u62e9\u6216\u586b\u5199 1 \u4e2a");
+    errors.push("驾驶员至少选择或填写 1 个");
   }
   return errors;
 }
@@ -203,24 +203,24 @@ function buildReportText(
   totalVolume: number,
 ): string {
   const lines = [
-    `${date} \u4f5c\u4e1a\u5185\u5bb9\u62a5\u8868`,
-    `\u603b\u65b9\u91cf\uff1a${formatNumber(totalVolume)} \u65b9`,
-    `\u6cf5\u8f66\uff1a${pumpItems.length} \u6761\uff0c${formatNumber(pumpVolume)} \u65b9`,
-    `\u6405\u62cc\u8f66\uff1a${mixerItems.length} \u6761\uff0c${formatNumber(mixerVolume)} \u65b9`,
+    `${date} 作业内容报表`,
+    `总方量：${formatNumber(totalVolume)} 方`,
+    `泵车：${pumpItems.length} 条，${formatNumber(pumpVolume)} 方`,
+    `搅拌车：${mixerItems.length} 条，${formatNumber(mixerVolume)} 方`,
   ];
 
   if (pumpItems.length) {
-    lines.push("", "\u6cf5\u8f66\u660e\u7ec6\uff1a");
+    lines.push("", "泵车明细：");
     for (const item of pumpItems) {
-      lines.push(`- ${item.customerName}\uff5c${item.truckModel}\uff5c${formatNumber(item.volume)} \u65b9\uff5c${item.location}`);
+      lines.push(`- ${item.customerName}｜${item.truckModel}｜${formatNumber(item.volume)} 方｜${item.location}`);
     }
   }
 
   if (mixerItems.length) {
-    lines.push("", "\u6405\u62cc\u8f66\u660e\u7ec6\uff1a");
+    lines.push("", "搅拌车明细：");
     for (const item of mixerItems) {
-      const drivers = item.drivers.length ? `\uff5c${item.drivers.join("\u3001")}` : "";
-      lines.push(`- ${item.customerName}\uff5c${formatNumber(item.volume)} \u65b9${drivers}\uff5c${item.remark}`);
+      const drivers = item.drivers.length ? `｜${item.drivers.join("、")}` : "";
+      lines.push(`- ${item.customerName}｜${formatNumber(item.volume)} 方${drivers}｜${item.remark}`);
     }
   }
 
@@ -230,7 +230,7 @@ function buildReportText(
 function groupVolumeByCustomer(records: Array<NormalizedPumpTruckRecord | NormalizedMixerTruckRecord>) {
   const groups = new Map<string, number>();
   for (const record of records) {
-    const key = record.customerName || "\u672a\u586b\u5199\u5ba2\u6237";
+    const key = record.customerName || "未填写客户";
     groups.set(key, (groups.get(key) || 0) + record.volume);
   }
   return [...groups.entries()]
@@ -242,7 +242,7 @@ function textValue(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value;
   if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join("\u3001");
+  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join("、");
   if (typeof value === "object") {
     const objectValue = value as { text?: unknown; name?: unknown; value?: unknown };
     return String(objectValue.text || objectValue.name || objectValue.value || "");
@@ -253,7 +253,7 @@ function textValue(value: unknown): string {
 function listValue(value: unknown): string[] {
   if (!value) return [];
   if (Array.isArray(value)) return value.map(textValue).map((item) => item.trim()).filter(Boolean);
-  return String(value).split(/[\u3001,\uff0c\s]+/).map((item) => item.trim()).filter(Boolean);
+  return String(value).split(/[、,，\s]+/).map((item) => item.trim()).filter(Boolean);
 }
 
 function numberValue(value: unknown): number {
