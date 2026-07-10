@@ -19,7 +19,10 @@
       <section id="reportPanel" class="tab-panel active">
         <div class="report-strip">
           <h2>昨日作业内容报表</h2>
-          <input id="reportDate" type="date" aria-label="报表日期">
+          <div class="report-controls">
+            <input id="reportDate" type="date" aria-label="报表日期">
+            <button id="refreshReport" class="refresh-report-button" type="button" title="重新读取飞书数据并刷新报表缓存">强制刷新</button>
+          </div>
         </div>
 
         <section class="details">

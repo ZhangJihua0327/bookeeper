@@ -37,6 +37,7 @@ const pumpForm = requiredElement<HTMLFormElement>("#pumpForm");
 const mixerForm = requiredElement<HTMLFormElement>("#mixerForm");
 const toast = requiredElement<HTMLDivElement>("#toast");
 const reportDate = requiredElement<HTMLInputElement>("#reportDate");
+const refreshReportButton = requiredElement<HTMLButtonElement>("#refreshReport");
 const reportText = requiredElement<HTMLPreElement>("#reportText");
 const pumpReportDetails = requiredElement<HTMLTableSectionElement>("#pumpReportDetails");
 const mixerReportDetails = requiredElement<HTMLTableSectionElement>("#mixerReportDetails");
@@ -66,7 +67,8 @@ mixerForm.addEventListener("submit", submitMixerTruck);
 mixerForm.addEventListener("input", updateMixerSummary);
 mixerRemarkRows.addEventListener("click", removeMixerRemarkRow);
 addMixerRemarkRowButton.addEventListener("click", () => addMixerRemarkRow());
-reportDate.addEventListener("change", loadReport);
+reportDate.addEventListener("change", () => void loadReport());
+refreshReportButton.addEventListener("click", refreshReportCache);
 
 addMixerRemarkRow(false);
 
@@ -236,15 +238,30 @@ function resetMixerForm(): void {
   if (dateInput) dateInput.value = defaultDate;
 }
 
-async function loadReport(): Promise<void> {
+async function refreshReportCache(): Promise<void> {
+  refreshReportButton.disabled = true;
+  const originalText = refreshReportButton.textContent;
+  refreshReportButton.textContent = "刷新中…";
+  const refreshed = await loadReport(true);
+  if (refreshed) showToast("报表缓存已强制刷新");
+  refreshReportButton.disabled = false;
+  refreshReportButton.textContent = originalText;
+}
+
+async function loadReport(forceRefresh = false): Promise<boolean> {
   try {
-    const query = reportDate.value ? `?date=${encodeURIComponent(reportDate.value)}` : "";
-    const report = await request<ReportResponse>(`/api/report/yesterday${query}`);
+    const params = new URLSearchParams();
+    if (reportDate.value) params.set("date", reportDate.value);
+    if (forceRefresh) params.set("refresh", "1");
+    const query = params.toString();
+    const report = await request<ReportResponse>(`/api/report/yesterday${query ? `?${query}` : ""}`);
     renderReport(report);
+    return true;
   } catch (error) {
     reportText.textContent = messageFromError(error);
     pumpReportDetails.innerHTML = emptyRow(4);
     mixerReportDetails.innerHTML = emptyRow(4);
+    return false;
   }
 }
 
@@ -363,7 +380,6 @@ function requiredChild<T extends Element>(parent: ParentNode, selector: string):
 function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 
 
 
