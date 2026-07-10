@@ -17,9 +17,23 @@ export interface PumpTruckInput {
 export interface MixerTruckInput {
   date: string;
   customerName: string;
-  volume: number | string;
   remark: string;
+  volume?: number | string;
+  drivers?: string[];
+}
+
+export interface MixerTruckRemarkEntry {
+  driver: string;
+  expression: string;
+  volume: number;
+}
+
+export interface ParsedMixerTruckRemark {
+  remark: string;
+  entries: MixerTruckRemarkEntry[];
   drivers: string[];
+  totalVolume: number;
+  errors: string[];
 }
 
 export interface NormalizedPumpTruckRecord {
@@ -163,12 +177,14 @@ export function makePumpTruckFields(input: PumpTruckInput, fieldNames: PumpTruck
 }
 
 export function makeMixerTruckFields(input: MixerTruckInput, fieldNames: MixerTruckFieldConfig): Record<string, unknown> {
+  const generated = parseMixerTruckRemark(input.remark);
+  if (generated.errors.length) throw new Error(generated.errors.join("；"));
   return {
     [fieldNames.date]: dateStringToFeishuTimestamp(input.date),
     [fieldNames.customerName]: input.customerName.trim(),
-    [fieldNames.volume]: Number(input.volume),
-    [fieldNames.remark]: input.remark.trim(),
-    [fieldNames.drivers]: input.drivers.map((name) => name.trim()).filter(Boolean),
+    [fieldNames.volume]: generated.totalVolume,
+    [fieldNames.remark]: generated.remark,
+    [fieldNames.drivers]: generated.drivers,
   };
 }
 
@@ -186,12 +202,76 @@ export function validateMixerTruck(input: Partial<MixerTruckInput>): string[] {
   const errors: string[] = [];
   if (!isDateString(input.date)) errors.push("日期不能为空");
   if (!trimmed(input.customerName)) errors.push("客户名称不能为空");
-  if (!positiveNumber(input.volume)) errors.push("方量必须大于 0");
-  if (!trimmed(input.remark)) errors.push("备注不能为空");
-  if (!Array.isArray(input.drivers) || input.drivers.map((name) => name.trim()).filter(Boolean).length === 0) {
-    errors.push("驾驶员至少选择或填写 1 个");
-  }
+  errors.push(...parseMixerTruckRemark(input.remark).errors);
   return errors;
+}
+
+export function parseMixerTruckRemark(value: unknown): ParsedMixerTruckRemark {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return emptyParsedRemark(["运输明细不能为空"]);
+
+  const entries: MixerTruckRemarkEntry[] = [];
+  const errors: string[] = [];
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  for (const [index, line] of lines.entries()) {
+    const separatorIndex = line.search(/[：:]/);
+    if (separatorIndex < 1) {
+      errors.push(`第 ${index + 1} 条应为“驾驶员：每车方量算式”`);
+      continue;
+    }
+
+    const driver = line.slice(0, separatorIndex).trim();
+    const expression = line.slice(separatorIndex + 1).trim();
+    if (!driver) {
+      errors.push(`第 ${index + 1} 条驾驶员不能为空`);
+      continue;
+    }
+
+    const evaluated = evaluateVolumeExpression(expression);
+    if (evaluated.error) {
+      errors.push(`第 ${index + 1} 条${evaluated.error}`);
+      continue;
+    }
+    entries.push({ driver, expression: evaluated.normalized, volume: evaluated.value });
+  }
+
+  if (errors.length) return emptyParsedRemark(errors);
+  const drivers = [...new Set(entries.map((entry) => entry.driver))];
+  const totalVolume = roundVolume(entries.reduce((total, entry) => total + entry.volume, 0));
+  return {
+    entries,
+    drivers,
+    totalVolume,
+    remark: entries.map((entry) => `${entry.driver}：${entry.expression}`).join("\n"),
+    errors: [],
+  };
+}
+
+export function evaluateVolumeExpression(value: unknown): { value: number; normalized: string; error: string } {
+  const normalized = typeof value === "string"
+    ? value.trim().replaceAll("＋", "+").replace(/[xX*]/g, "×").replaceAll(/\s/g, "")
+    : "";
+  if (!normalized) return { value: 0, normalized, error: "每车方量不能为空" };
+  if (!/^\d+(?:\.\d+)?(?:[+×]\d+(?:\.\d+)?)*$/.test(normalized)) {
+    return { value: 0, normalized, error: "方量只能使用数字、加号和乘号" };
+  }
+
+  const result = normalized.split("+").reduce((sum, product) => {
+    return sum + product.split("×").reduce((value, factor) => value * Number(factor), 1);
+  }, 0);
+  if (!Number.isFinite(result) || result <= 0) {
+    return { value: 0, normalized, error: "计算后的方量必须大于 0" };
+  }
+  return { value: roundVolume(result), normalized, error: "" };
+}
+
+function emptyParsedRemark(errors: string[]): ParsedMixerTruckRemark {
+  return { remark: "", entries: [], drivers: [], totalVolume: 0, errors };
+}
+
+function roundVolume(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
 
 function buildReportText(

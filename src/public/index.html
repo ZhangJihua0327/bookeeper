@@ -83,9 +83,16 @@
             <form id="mixerForm" class="entry-form">
               <label>日期<input name="date" type="date" required></label>
               <label>客户名称<input name="customerName" list="mixerCustomerOptions" required></label>
-              <label>方量<input name="volume" type="number" inputmode="decimal" min="0" step="0.01" required></label>
-              <label>驾驶员<input name="drivers" list="driverOptions" required placeholder="张三、李四"></label>
-              <label class="wide">备注<textarea name="remark" rows="3" required placeholder="例如：张三 12 方，李四 18 方"></textarea></label>
+              <fieldset class="mixer-details wide">
+                <legend>运输明细（写入备注）</legend>
+                <p class="field-help">每位驾驶员填写一条；方量支持数字、加号和乘号，例如 12+8×2。</p>
+                <div id="mixerRemarkRows" class="mixer-remark-rows"></div>
+                <button id="addMixerRemarkRow" class="secondary-button" type="button">+ 添加驾驶员</button>
+              </fieldset>
+              <div class="generated-summary wide" aria-live="polite">
+                <label>总方量（自动生成）<input id="mixerVolume" type="text" readonly value="0 方"></label>
+                <label>驾驶员（自动生成）<input id="mixerDrivers" type="text" readonly value="未填写"></label>
+              </div>
               <button type="submit">提交搅拌车记录</button>
             </form>
           </div>
@@ -96,6 +103,15 @@
       <datalist id="pumpCustomerOptions"></datalist>
       <datalist id="mixerCustomerOptions"></datalist>
       <datalist id="driverOptions"></datalist>
+
+      <template id="mixerRemarkRowTemplate">
+        <div class="mixer-remark-row">
+          <label>驾驶员<input class="mixer-driver" list="driverOptions" required placeholder="例如：张三"></label>
+          <label>每车方量<input class="mixer-expression" inputmode="decimal" required placeholder="例如：12+8×2"></label>
+          <button class="remove-detail-button" type="button" aria-label="删除这条驾驶员明细">删除</button>
+          <p class="expression-error" aria-live="polite"></p>
+        </div>
+      </template>
     </main>
 
     <div class="toast" id="toast"></div>

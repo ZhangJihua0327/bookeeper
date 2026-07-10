@@ -40,6 +40,11 @@ const reportDate = requiredElement<HTMLInputElement>("#reportDate");
 const reportText = requiredElement<HTMLPreElement>("#reportText");
 const pumpReportDetails = requiredElement<HTMLTableSectionElement>("#pumpReportDetails");
 const mixerReportDetails = requiredElement<HTMLTableSectionElement>("#mixerReportDetails");
+const mixerRemarkRows = requiredElement<HTMLDivElement>("#mixerRemarkRows");
+const mixerRemarkRowTemplate = requiredElement<HTMLTemplateElement>("#mixerRemarkRowTemplate");
+const addMixerRemarkRowButton = requiredElement<HTMLButtonElement>("#addMixerRemarkRow");
+const mixerVolume = requiredElement<HTMLInputElement>("#mixerVolume");
+const mixerDrivers = requiredElement<HTMLInputElement>("#mixerDrivers");
 const strokeCollator = new Intl.Collator("zh-Hans-CN-u-co-stroke");
 const fallbackCollator = new Intl.Collator("zh-Hans-CN");
 
@@ -58,7 +63,12 @@ for (const tab of document.querySelectorAll<HTMLButtonElement>(".tab")) {
 
 pumpForm.addEventListener("submit", submitPumpTruck);
 mixerForm.addEventListener("submit", submitMixerTruck);
+mixerForm.addEventListener("input", updateMixerSummary);
+mixerRemarkRows.addEventListener("click", removeMixerRemarkRow);
+addMixerRemarkRowButton.addEventListener("click", () => addMixerRemarkRow());
 reportDate.addEventListener("change", loadReport);
+
+addMixerRemarkRow(false);
 
 await Promise.all([loadReport(), loadOptions()]);
 
@@ -92,20 +102,28 @@ async function submitPumpTruck(event: SubmitEvent): Promise<void> {
 async function submitMixerTruck(event: SubmitEvent): Promise<void> {
   event.preventDefault();
   const form = new FormData(mixerForm);
+  const details = readMixerDetails(true);
+  if (!details) return;
   const payload = {
     date: stringValue(form.get("date")),
     customerName: stringValue(form.get("customerName")),
-    volume: Number(form.get("volume")),
-    remark: stringValue(form.get("remark")),
-    drivers: splitDrivers(form.get("drivers")),
+    volume: details.totalVolume,
+    remark: details.remark,
+    drivers: details.drivers,
     addMissingOptions: true,
   };
 
-  await submitRecord("/api/records/mixer-truck", payload, mixerForm, "搅拌车记录已提交");
+  await submitRecord("/api/records/mixer-truck", payload, mixerForm, "搅拌车记录已提交", resetMixerForm);
 }
 
-async function submitRecord(path: string, payload: unknown, form: HTMLFormElement, message: string): Promise<void> {
-  const button = form.querySelector<HTMLButtonElement>("button");
+async function submitRecord(
+  path: string,
+  payload: unknown,
+  form: HTMLFormElement,
+  message: string,
+  resetter: () => void = () => resetFormForNextEntry(form),
+): Promise<void> {
+  const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (button) button.disabled = true;
   try {
     const result = await request<{ addedOptions?: string[] }>(path, {
@@ -114,15 +132,108 @@ async function submitRecord(path: string, payload: unknown, form: HTMLFormElemen
     });
     const added = result.addedOptions?.length ? `，新增选项：${result.addedOptions.join("、")}` : "";
     showToast(`${message}${added}`);
-    form.reset();
-    const dateInput = form.querySelector<HTMLInputElement>('input[type="date"]');
-    if (dateInput) dateInput.value = defaultDate;
+    resetter();
     await Promise.all([loadReport(), loadOptions()]);
   } catch (error) {
     showToast(messageFromError(error));
   } finally {
     if (button) button.disabled = false;
   }
+}
+
+interface MixerDetail {
+  driver: string;
+  expression: string;
+  volume: number;
+}
+
+function addMixerRemarkRow(focus = true): void {
+  const fragment = mixerRemarkRowTemplate.content.cloneNode(true);
+  mixerRemarkRows.append(fragment);
+  const addedRow = mixerRemarkRows.lastElementChild;
+  if (focus) addedRow?.querySelector<HTMLInputElement>(".mixer-driver")?.focus();
+  updateMixerSummary();
+}
+
+function removeMixerRemarkRow(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement) || !target.classList.contains("remove-detail-button")) return;
+  target.closest(".mixer-remark-row")?.remove();
+  if (!mixerRemarkRows.children.length) addMixerRemarkRow();
+  updateMixerSummary();
+}
+
+function updateMixerSummary(): void {
+  const details = readMixerDetails(false);
+  mixerVolume.value = details ? `${formatVolume(details.totalVolume)} 方` : "—";
+  mixerDrivers.value = details?.drivers.length ? details.drivers.join("、") : "未填写";
+}
+
+function readMixerDetails(showErrors: boolean): { remark: string; drivers: string[]; totalVolume: number } | null {
+  const details: MixerDetail[] = [];
+  let valid = true;
+
+  for (const row of mixerRemarkRows.querySelectorAll<HTMLElement>(".mixer-remark-row")) {
+    const driverInput = requiredChild<HTMLInputElement>(row, ".mixer-driver");
+    const expressionInput = requiredChild<HTMLInputElement>(row, ".mixer-expression");
+    const errorElement = requiredChild<HTMLParagraphElement>(row, ".expression-error");
+    const driver = driverInput.value.trim();
+    const expressionResult = evaluateVolumeExpression(expressionInput.value);
+    const rowIsBlank = !driver && !expressionInput.value.trim();
+    const error = rowIsBlank
+      ? "请填写驾驶员和每车方量"
+      : !driver
+        ? "请填写驾驶员"
+        : expressionResult.error;
+
+    errorElement.textContent = showErrors && error ? error : "";
+    errorElement.classList.toggle("show", Boolean(showErrors && error));
+    if (error) {
+      valid = false;
+      continue;
+    }
+
+    details.push({
+      driver,
+      expression: expressionResult.normalized,
+      volume: expressionResult.value,
+    });
+  }
+
+  if (!valid || !details.length) {
+    if (showErrors) showToast("请检查驾驶员运输明细");
+    return null;
+  }
+
+  return {
+    remark: details.map((detail) => `${detail.driver}：${detail.expression}`).join("\n"),
+    drivers: uniqueInInputOrder(details.map((detail) => detail.driver)),
+    totalVolume: roundVolume(details.reduce((total, detail) => total + detail.volume, 0)),
+  };
+}
+
+function evaluateVolumeExpression(input: string): { value: number; normalized: string; error: string } {
+  const normalized = input.trim().replaceAll("＋", "+").replace(/[xX*]/g, "×").replaceAll(/\s/g, "");
+  if (!normalized) return { value: 0, normalized, error: "请填写每车方量" };
+  if (!/^\d+(?:\.\d+)?(?:[+×]\d+(?:\.\d+)?)*$/.test(normalized)) {
+    return { value: 0, normalized, error: "方量只能使用数字、加号和乘号" };
+  }
+
+  const result = normalized.split("+").reduce((sum, product) => {
+    return sum + product.split("×").reduce((result, factor) => result * Number(factor), 1);
+  }, 0);
+  if (!Number.isFinite(result) || result <= 0) {
+    return { value: 0, normalized, error: "计算后的方量必须大于 0" };
+  }
+  return { value: roundVolume(result), normalized, error: "" };
+}
+
+function resetMixerForm(): void {
+  mixerForm.reset();
+  mixerRemarkRows.replaceChildren();
+  addMixerRemarkRow(false);
+  const dateInput = mixerForm.querySelector<HTMLInputElement>('input[type="date"]');
+  if (dateInput) dateInput.value = defaultDate;
 }
 
 async function loadReport(): Promise<void> {
@@ -189,15 +300,16 @@ function emptyRow(colspan: number): string {
   return `<tr><td colspan="${colspan}" class="empty-cell">当前日期没有匹配的作业内容</td></tr>`;
 }
 
-function splitDrivers(value: FormDataEntryValue | null): string[] {
-  return stringValue(value)
-    .split(/[、,，\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function unique(values: string[]): string[] {
   return [...new Set(values.map((item) => item.trim()).filter(Boolean))].sort(compareByChineseStroke);
+}
+
+function uniqueInInputOrder(values: string[]): string[] {
+  return [...new Set(values.map((item) => item.trim()).filter(Boolean))];
+}
+
+function roundVolume(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
 
 
@@ -242,13 +354,15 @@ function requiredElement<T extends Element>(selector: string): T {
   return element;
 }
 
+function requiredChild<T extends Element>(parent: ParentNode, selector: string): T {
+  const element = parent.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing child element: ${selector}`);
+  return element;
+}
+
 function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
-
-
-
 
 
 

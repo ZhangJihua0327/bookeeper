@@ -11,6 +11,7 @@ import {
   makePumpTruckFields,
   normalizeMixerRecords,
   normalizePumpRecords,
+  parseMixerTruckRemark,
   validateMixerTruck,
   validatePumpTruck,
   type MixerTruckInput,
@@ -148,9 +149,11 @@ async function handleCreateMixerTruck({ req, res }: RouteContext): Promise<void>
     return;
   }
 
+  const generated = parseMixerTruckRemark(input.remark);
+
   const addedOptions = input.addMissingOptions === false ? [] : await Promise.all([
     feishu.ensureFieldOptions(config.bitable.mixerTruckTableId, config.bitable.fields.mixerTruck.customerName, [input.customerName]),
-    feishu.ensureFieldOptions(config.bitable.mixerTruckTableId, config.bitable.fields.mixerTruck.drivers, input.drivers),
+    feishu.ensureFieldOptions(config.bitable.mixerTruckTableId, config.bitable.fields.mixerTruck.drivers, generated.drivers),
   ]).then((items) => items.flat());
 
   const fields = makeMixerTruckFields(input, config.bitable.fields.mixerTruck);
