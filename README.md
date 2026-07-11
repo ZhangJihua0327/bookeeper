@@ -48,57 +48,53 @@ MIXER_TRUCK_TABLE_ID=
 
 ## Docker Compose
 
-Compose 使用本地已有的 `node:lts-alpine` 基础镜像构建应用镜像，并把服务开放到宿主机 80 端口：
+Compose 构建应用镜像，应用仅在 Docker 外部网络 `web` 中暴露 3000 端口。首次启动前创建网络：
 
 ```bash
-docker compose build
-docker compose up -d
+docker network create web
+docker compose up -d --build
 ```
 
-启动后访问 http://localhost/。容器内 PORT=80，宿主机端口映射为 80:80。
+生产流量由独立网关转发到 `bookeeper:3000`，应用本身不绑定宿主机端口。
 
 
 
-## HTTPS / Nginx
+## 独立 HTTPS 网关
 
-生产环境域名：`bookeeper.lollipopzzz.cn`。
+Nginx 和 Certbot 在服务器上的独立 Compose 项目 `~/gateway` 中运行，不属于本应用，也不随本应用部署。生产域名 `bookeeper.lollipopzzz.cn` 的站点配置通过共享 Docker 网络 `web` 访问 `bookeeper:3000`。
 
 DNS 先把 `bookeeper.lollipopzzz.cn` 的 A 记录解析到云服务器公网 IP，并确认服务器安全组开放 80 和 443。
 
-首次签发证书并启用 HTTPS：
+接入其他应用时，让应用加入外部网络 `web`，然后在网关中增加一个站点配置，例如：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name service.lollipopzzz.cn;
+
+    ssl_certificate /etc/letsencrypt/live/service.lollipopzzz.cn/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/service.lollipopzzz.cn/privkey.pem;
+
+    location / {
+        proxy_pass http://service:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+新域名需先添加指向服务器的 DNS 记录，再由网关签发证书：
 
 ```bash
-cd /opt/bookeeper
-cp .env.example .env
-# 编辑 .env，填入飞书配置
-export CERTBOT_EMAIL=Zhangjihua0327@outlook.com
-sh scripts/init-https.sh
+cd ~/gateway
+docker compose run --rm certbot certonly --webroot -w /var/www/certbot \
+  -d service.lollipopzzz.cn --email YOUR_EMAIL --agree-tos --no-eff-email
+docker compose exec nginx nginx -s reload
 ```
 
-脚本流程：
-
-1. nginx 先用 HTTP 配置启动，代理应用并暴露 `/.well-known/acme-challenge/`。
-2. `certbot/certbot:latest` 使用 webroot 方式签发 `bookeeper.lollipopzzz.cn` 证书。
-3. 签发成功后切换到 HTTPS nginx 配置，并把 80 重定向到 443。
-
-续期证书：
-
-```bash
-cd /opt/bookeeper
-sh scripts/renew-https.sh
-```
-
-建议添加服务器 crontab：
-
-```cron
-0 3 * * 1 cd /opt/bookeeper && sh scripts/renew-https.sh >> certbot-renew.log 2>&1
-```
-
-当前 `docker-compose.yml` 使用：
-
-- `bookeeper`：内部监听 3000
-- `nginx:stable-alpine3.23-perl`：公网 80/443
-- `certbot/certbot:latest`：签发和续期证书
+证书续期由独立网关的 Certbot 容器负责，应用部署不重启网关。
 ## GitHub 自动部署
 
 服务器准备：
