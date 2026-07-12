@@ -33,6 +33,11 @@ interface ReportResponse {
   text: string;
 }
 
+interface PendingSubmission {
+  id: string;
+  fingerprint: string;
+}
+
 const pumpForm = requiredElement<HTMLFormElement>("#pumpForm");
 const mixerForm = requiredElement<HTMLFormElement>("#mixerForm");
 const toast = requiredElement<HTMLDivElement>("#toast");
@@ -48,6 +53,8 @@ const mixerVolume = requiredElement<HTMLInputElement>("#mixerVolume");
 const mixerDrivers = requiredElement<HTMLInputElement>("#mixerDrivers");
 const strokeCollator = new Intl.Collator("zh-Hans-CN-u-co-stroke");
 const fallbackCollator = new Intl.Collator("zh-Hans-CN");
+const pendingSubmissions = new WeakMap<HTMLFormElement, PendingSubmission>();
+let showToastTimer = 0;
 
 const today = new Date();
 const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
@@ -76,7 +83,7 @@ await Promise.all([loadReport(), loadOptions()]);
 
 async function loadOptions(): Promise<void> {
   try {
-    const options = await request<OptionSets>("/api/options");
+    const options = await request<OptionSets>("/api/options", {}, 1);
     setDatalist("#pumpTruckModelOptions", options.pumpTruck.truckModel);
     setDatalist("#pumpCustomerOptions", options.pumpTruck.customerName);
     setDatalist("#mixerCustomerOptions", options.mixerTruck.customerName);
@@ -120,24 +127,36 @@ async function submitMixerTruck(event: SubmitEvent): Promise<void> {
 
 async function submitRecord(
   path: string,
-  payload: unknown,
+  payload: Record<string, unknown>,
   form: HTMLFormElement,
   message: string,
   resetter: () => void = () => resetFormForNextEntry(form),
 ): Promise<void> {
   const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (button) button.disabled = true;
+  const fingerprint = JSON.stringify(payload);
+  const previousSubmission = pendingSubmissions.get(form);
+  const submission = previousSubmission?.fingerprint === fingerprint
+    ? previousSubmission
+    : { id: createSubmissionId(), fingerprint };
+  pendingSubmissions.set(form, submission);
+
   try {
-    const result = await request<{ addedOptions?: string[] }>(path, {
+    const result = await request<{ addedOptions?: string[]; replayed?: boolean }>(path, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, submissionId: submission.id }),
     });
     const added = result.addedOptions?.length ? `，新增选项：${result.addedOptions.join("、")}` : "";
-    showToast(`${message}${added}`);
+    const confirmed = result.replayed ? "（已确认此前请求写入成功）" : "";
+    showToast(`${message}${confirmed}${added}`);
+    pendingSubmissions.delete(form);
     resetter();
-    await Promise.all([loadReport(), loadOptions()]);
+    await loadReport();
+    if (result.addedOptions?.length) await loadOptions();
   } catch (error) {
-    showToast(messageFromError(error));
+    showToast(isNetworkError(error)
+      ? "连接中断，提交结果未知；请勿修改表单，稍后再次提交将沿用本次提交编号"
+      : messageFromError(error));
   } finally {
     if (button) button.disabled = false;
   }
@@ -277,11 +296,20 @@ function renderReport(report: ReportResponse): void {
     : emptyRow(4);
 }
 
-async function request<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json; charset=utf-8", ...(options.headers || {}) },
-    ...options,
-  });
+async function request<T = unknown>(path: string, options: RequestInit = {}, networkRetries = 0): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      headers: { "Content-Type": "application/json; charset=utf-8", ...(options.headers || {}) },
+      ...options,
+    });
+  } catch (error) {
+    if (networkRetries > 0 && (!options.method || options.method === "GET")) {
+      await delay(250);
+      return request<T>(path, options, networkRetries - 1);
+    }
+    throw error;
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const errorPayload = payload as { error?: string; details?: unknown };
@@ -289,6 +317,18 @@ async function request<T = unknown>(path: string, options: RequestInit = {}): Pr
     throw new Error(`${errorPayload.error || "请求失败"}${details}`);
   }
   return payload as T;
+}
+
+function createSubmissionId(): string {
+  return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function isNetworkError(error: unknown): boolean {
+  return error instanceof TypeError;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function activateTab(panelId: string): void {
@@ -355,8 +395,6 @@ function showToast(message: string): void {
   showToastTimer = window.setTimeout(() => toast.classList.remove("show"), 2600);
 }
 
-let showToastTimer = 0;
-
 function escapeHtml(value: string): string {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -380,6 +418,3 @@ function requiredChild<T extends Element>(parent: ParentNode, selector: string):
 function messageFromError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
-
-

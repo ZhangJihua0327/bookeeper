@@ -2,7 +2,7 @@
 import { dirname, join } from "node:path";
 import { stripTypeScriptTypes } from "node:module";
 
-const serverFiles = ["config.ts", "feishu.ts", "report.ts", "index.ts"];
+const serverFiles = ["config.ts", "feishu.ts", "report.ts", "request-cache.ts", "index.ts"];
 const publicFiles = ["index.html", "styles.css"];
 
 await rm("dist", { recursive: true, force: true });

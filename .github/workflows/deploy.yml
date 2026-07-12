@@ -57,3 +57,31 @@ jobs:
              git reset --hard 'origin/$DEPLOY_BRANCH'
              chmod +x scripts/deploy.sh
              ./scripts/deploy.sh"
+
+      - name: Verify public API
+        run: |
+          set -eu
+          attempt=1
+          while [ "$attempt" -le 5 ]; do
+            if curl --fail --silent --show-error --max-time 15 \
+              https://bookeeper.lollipopzzz.cn/api/options >/dev/null; then
+              echo "Public /api/options probe succeeded on attempt $attempt"
+              exit 0
+            fi
+            sleep 2
+            attempt=$((attempt + 1))
+          done
+          echo "Public /api/options probe failed after 5 attempts" >&2
+          exit 1
+
+      - name: Collect deployment diagnostics
+        if: failure()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ steps.ssh.outputs.port }}
+        run: |
+          ssh -p "$DEPLOY_PORT" -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker inspect --format 'bookeeper restart_count={{.RestartCount}} status={{.State.Status}}' bookeeper || true
+             docker logs --tail 100 bookeeper || true
+             cd \"\$HOME/gateway\" && docker compose logs --tail 100 nginx || true"

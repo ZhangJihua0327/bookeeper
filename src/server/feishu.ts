@@ -179,7 +179,7 @@ export class FeishuBitableClient {
 
   private async request<T>(method: string, path: string, payload?: unknown): Promise<FeishuResponse<T>> {
     const token = await this.getTenantAccessToken();
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await this.fetchResponse(method, path, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -197,7 +197,8 @@ export class FeishuBitableClient {
       return this.cachedToken;
     }
 
-    const response = await fetch(`${this.baseUrl}/open-apis/auth/v3/tenant_access_token/internal`, {
+    const tokenPath = "/open-apis/auth/v3/tenant_access_token/internal";
+    const response = await this.fetchResponse("POST", tokenPath, {
       method: "POST",
       headers: { "Content-Type": "application/json; charset=utf-8" },
       body: JSON.stringify({
@@ -217,6 +218,30 @@ export class FeishuBitableClient {
     this.tokenExpiresAt = now + Math.max(expiresInSeconds - 300, 60) * 1000;
     return token;
   }
+
+  private async fetchResponse(method: string, path: string, init: RequestInit): Promise<Response> {
+    const maxAttempts = method === "GET" ? 2 : 1;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const startedAt = Date.now();
+      try {
+        const response = await fetch(`${this.baseUrl}${path}`, init);
+        console.log(`Feishu ${method} ${safePath(path)} ${response.status} ${Date.now() - startedAt}ms attempt=${attempt}`);
+        return response;
+      } catch (error) {
+        lastError = error;
+        console.error(`Feishu ${method} ${safePath(path)} connection failed after ${Date.now() - startedAt}ms attempt=${attempt}`, error);
+        if (attempt < maxAttempts) await delay(200);
+      }
+    }
+
+    throw new FeishuApiError("连接飞书接口失败", {
+      method,
+      path: safePath(path),
+      cause: lastError instanceof Error ? lastError.message : String(lastError),
+    });
+  }
 }
 
 function optionNames(field: FeishuField): string[] {
@@ -228,6 +253,18 @@ function optionNames(field: FeishuField): string[] {
 
 function uniqueCleanValues(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function safePath(path: string): string {
+  return path
+    .split("?", 1)[0]
+    .replace(/\/apps\/[^/]+/, "/apps/:app")
+    .replace(/\/tables\/[^/]+/, "/tables/:table")
+    .replace(/\/records\/[^/]+/, "/records/:record");
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function parseFeishuResponse<T>(response: Response): Promise<FeishuResponse<T>> {

@@ -97,6 +97,9 @@ docker compose exec nginx nginx -s reload
 证书续期由独立网关的 Certbot 容器负责。应用部署完成后，`scripts/deploy.sh` 会执行
 `nginx -t` 并 reload 独立网关，让 Nginx 重新解析可能已变更的 `bookeeper` 容器地址。
 网关目录默认是 `~/gateway`，也可以通过服务器环境变量 `GATEWAY_PATH` 覆盖。
+部署脚本随后会从后端容器本机和 Nginx 容器读取 `/api/options`，GitHub Runner 再从公网域名
+进行最多 5 次探测。任一只读探测失败时，Actions 会输出 bookeeper 与 Nginx 的最近日志并
+标记部署检查失败。
 ## GitHub 自动部署
 
 服务器准备：
@@ -128,5 +131,7 @@ GitHub 仓库添加 Actions Secrets：
 - GET /api/options：读取飞书字段下拉选项
 - POST /api/options：新增字段下拉选项
 
-
+下拉选项在服务端缓存 5 分钟；实际新增字段选项后缓存会立即失效。记录提交支持前端生成的
+`submissionId`，同一实例在 10 分钟内收到相同 ID 和内容时会复用首次执行结果，降低连接中断后
+重复提交造成重复记录的风险。
 

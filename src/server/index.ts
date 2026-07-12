@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,7 @@ import {
   type PumpTruckInput,
   type VehicleReport,
 } from "./report.js";
+import { ExpiringRequestCache, IdempotencyConflictError } from "./request-cache.js";
 
 interface RouteContext {
   req: IncomingMessage;
@@ -27,10 +29,12 @@ interface RouteContext {
 
 interface CreatePumpTruckInput extends PumpTruckInput {
   addMissingOptions?: boolean;
+  submissionId?: string;
 }
 
 interface CreateMixerTruckInput extends MixerTruckInput {
   addMissingOptions?: boolean;
+  submissionId?: string;
 }
 
 interface AddOptionInput {
@@ -47,6 +51,23 @@ interface ReportCacheEntry {
   pending?: Promise<VehicleReport>;
 }
 
+interface OptionSets {
+  pumpTruck: { truckModel: string[]; customerName: string[] };
+  mixerTruck: { customerName: string[]; drivers: string[] };
+}
+
+interface OptionCacheEntry {
+  expiresAt: number;
+  value?: OptionSets;
+  pending?: Promise<OptionSets>;
+}
+
+interface CreateRecordResult {
+  record: unknown;
+  fields: Record<string, unknown>;
+  addedOptions: string[];
+}
+
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
 const missingConfig = getMissingConfig();
 
@@ -59,6 +80,10 @@ const feishu = new FeishuBitableClient({
 
 const reportCache = new Map<string, ReportCacheEntry>();
 const reportCacheTtlMs = 5 * 60 * 1000;
+const submissionCache = new ExpiringRequestCache<CreateRecordResult>(10 * 60 * 1000);
+let optionCache: OptionCacheEntry | null = null;
+let optionCacheVersion = 0;
+const optionCacheTtlMs = 5 * 60 * 1000;
 
 const routes: Record<string, RouteHandler> = {
   "GET /api/health": handleHealth,
@@ -71,6 +96,18 @@ const routes: Record<string, RouteHandler> = {
 };
 
 const server = createServer(async (req, res) => {
+  const requestId = randomUUID();
+  const startedAt = Date.now();
+  res.setHeader("X-Request-Id", requestId);
+  res.once("finish", () => {
+    console.log(`${requestId} ${req.method} ${req.url} ${res.statusCode} ${Date.now() - startedAt}ms`);
+  });
+  res.once("close", () => {
+    if (!res.writableFinished) {
+      console.warn(`${requestId} ${req.method} ${req.url} connection closed after ${Date.now() - startedAt}ms`);
+    }
+  });
+
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const route = routes[`${req.method} ${url.pathname}`];
@@ -109,7 +146,7 @@ async function handleHealth({ res }: RouteContext): Promise<void> {
 
 async function handleOptions({ res }: RouteContext): Promise<void> {
   ensureConfigured();
-  sendJson(res, 200, await loadOptionSets());
+  sendJson(res, 200, await getOptionSets());
 }
 
 async function handleAddOption({ req, res }: RouteContext): Promise<void> {
@@ -117,6 +154,7 @@ async function handleAddOption({ req, res }: RouteContext): Promise<void> {
   const input = await readJson<AddOptionInput>(req);
   const target = optionTarget(input.table, input.field);
   const result = await feishu.addFieldOption(target.tableId, target.fieldName, input.value || "");
+  if (result.added) invalidateOptionCache();
   sendJson(res, 200, result);
 }
 
@@ -129,15 +167,19 @@ async function handleCreatePumpTruck({ req, res }: RouteContext): Promise<void> 
     return;
   }
 
-  const addedOptions = input.addMissingOptions === false ? [] : await Promise.all([
-    feishu.ensureFieldOptions(config.bitable.pumpTruckTableId, config.bitable.fields.pumpTruck.truckModel, [input.truckModel]),
-    feishu.ensureFieldOptions(config.bitable.pumpTruckTableId, config.bitable.fields.pumpTruck.customerName, [input.customerName]),
-  ]).then((items) => items.flat());
+  const result = await createIdempotently("pump-truck", input, async () => {
+    const addedOptions = input.addMissingOptions === false ? [] : await Promise.all([
+      feishu.ensureFieldOptions(config.bitable.pumpTruckTableId, config.bitable.fields.pumpTruck.truckModel, [input.truckModel]),
+      feishu.ensureFieldOptions(config.bitable.pumpTruckTableId, config.bitable.fields.pumpTruck.customerName, [input.customerName]),
+    ]).then((items) => items.flat());
 
-  const fields = makePumpTruckFields(input, config.bitable.fields.pumpTruck);
-  const record = await feishu.createRecord(config.bitable.pumpTruckTableId, fields);
-  invalidateReportCache(input.date);
-  sendJson(res, 201, { record, fields, addedOptions });
+    const fields = makePumpTruckFields(input, config.bitable.fields.pumpTruck);
+    const record = await feishu.createRecord(config.bitable.pumpTruckTableId, fields);
+    invalidateReportCache(input.date);
+    if (addedOptions.length) invalidateOptionCache();
+    return { record, fields, addedOptions };
+  });
+  sendJson(res, result.replayed ? 200 : 201, { ...result.value, replayed: result.replayed });
 }
 
 async function handleCreateMixerTruck({ req, res }: RouteContext): Promise<void> {
@@ -149,17 +191,20 @@ async function handleCreateMixerTruck({ req, res }: RouteContext): Promise<void>
     return;
   }
 
-  const generated = parseMixerTruckRemark(input.remark);
+  const result = await createIdempotently("mixer-truck", input, async () => {
+    const generated = parseMixerTruckRemark(input.remark);
+    const addedOptions = input.addMissingOptions === false ? [] : await Promise.all([
+      feishu.ensureFieldOptions(config.bitable.mixerTruckTableId, config.bitable.fields.mixerTruck.customerName, [input.customerName]),
+      feishu.ensureFieldOptions(config.bitable.mixerTruckTableId, config.bitable.fields.mixerTruck.drivers, generated.drivers),
+    ]).then((items) => items.flat());
 
-  const addedOptions = input.addMissingOptions === false ? [] : await Promise.all([
-    feishu.ensureFieldOptions(config.bitable.mixerTruckTableId, config.bitable.fields.mixerTruck.customerName, [input.customerName]),
-    feishu.ensureFieldOptions(config.bitable.mixerTruckTableId, config.bitable.fields.mixerTruck.drivers, generated.drivers),
-  ]).then((items) => items.flat());
-
-  const fields = makeMixerTruckFields(input, config.bitable.fields.mixerTruck);
-  const record = await feishu.createRecord(config.bitable.mixerTruckTableId, fields);
-  invalidateReportCache(input.date);
-  sendJson(res, 201, { record, fields, addedOptions });
+    const fields = makeMixerTruckFields(input, config.bitable.fields.mixerTruck);
+    const record = await feishu.createRecord(config.bitable.mixerTruckTableId, fields);
+    invalidateReportCache(input.date);
+    if (addedOptions.length) invalidateOptionCache();
+    return { record, fields, addedOptions };
+  });
+  sendJson(res, result.replayed ? 200 : 201, { ...result.value, replayed: result.replayed });
 }
 
 async function handleYesterdayReport({ res, url }: RouteContext): Promise<void> {
@@ -227,7 +272,27 @@ async function handleRecentRecords({ res }: RouteContext): Promise<void> {
   });
 }
 
-async function loadOptionSets() {
+async function getOptionSets(): Promise<OptionSets> {
+  const now = Date.now();
+  if (optionCache?.value && optionCache.expiresAt > now) return optionCache.value;
+  if (optionCache?.pending) return optionCache.pending;
+
+  const version = optionCacheVersion;
+  const pending = loadOptionSets();
+  optionCache = { pending, expiresAt: now + optionCacheTtlMs };
+  try {
+    const value = await pending;
+    if (optionCacheVersion === version) {
+      optionCache = { value, expiresAt: Date.now() + optionCacheTtlMs };
+    }
+    return value;
+  } catch (error) {
+    if (optionCacheVersion === version) optionCache = null;
+    throw error;
+  }
+}
+
+async function loadOptionSets(): Promise<OptionSets> {
   const [pumpTruckModel, pumpCustomerName, mixerCustomerName, mixerDrivers] = await Promise.all([
     feishu.getFieldOptions(config.bitable.pumpTruckTableId, config.bitable.fields.pumpTruck.truckModel),
     feishu.getFieldOptions(config.bitable.pumpTruckTableId, config.bitable.fields.pumpTruck.customerName),
@@ -245,6 +310,31 @@ async function loadOptionSets() {
       drivers: mixerDrivers,
     },
   };
+}
+
+function invalidateOptionCache(): void {
+  optionCacheVersion += 1;
+  optionCache = null;
+}
+
+async function createIdempotently(
+  kind: string,
+  input: CreatePumpTruckInput | CreateMixerTruckInput,
+  operation: () => Promise<CreateRecordResult>,
+): Promise<{ value: CreateRecordResult; replayed: boolean }> {
+  const submissionId = input.submissionId?.trim();
+  if (!submissionId) return { value: await operation(), replayed: false };
+  if (submissionId.length > 128) throw new HttpError(400, "submissionId 过长");
+
+  const { submissionId: ignored, ...payload } = input;
+  try {
+    return await submissionCache.execute(`${kind}:${submissionId}`, JSON.stringify(payload), operation);
+  } catch (error) {
+    if (error instanceof IdempotencyConflictError) {
+      throw new HttpError(409, error.message);
+    }
+    throw error;
+  }
 }
 
 function optionTarget(table: AddOptionInput["table"], field: string): { tableId: string; fieldName: string } {
