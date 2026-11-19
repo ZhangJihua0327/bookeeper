@@ -62,7 +62,7 @@ function textValue(value) {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value.trim();
   if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join("、");
+  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join(", ");
   if (typeof value === "object") {
     return textValue(value.text ?? value.name ?? value.value ?? "");
   }
