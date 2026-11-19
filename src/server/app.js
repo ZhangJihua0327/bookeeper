@@ -134,7 +134,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
       store.getFormulas(),
       store.listPrices(),
     ]);
-    const grouped = { customer: [], truck_model: [], location: [] };
+    const grouped = { customer: [], truck_model: [] };
     for (const item of dicts) {
       if (grouped[item.kind]) {
         grouped[item.kind].push({ id: item.id, label: item.label, scope: item.scope, sort_order: item.sort_order });
@@ -243,7 +243,6 @@ async function handleApi({ request, response, url, path, method, store, config, 
       truck_model: body.truck_model,
       customer_name: body.customer_name,
       volume: body.volume,
-      location: body.location,
       remark: body.remark,
     });
     const price = priceIndex.resolve(scope, values["客户名称"], values["车型"]);
@@ -489,7 +488,6 @@ export function buildDashboard(rows, context) {
     groups: {
       customer: groupRows(rows, (row) => row.customer_name || "未填写客户", "customer"),
       model: groupRows(rows, (row) => row.truck_model || "未填写车型", "model"),
-      location: groupRows(rows, (row) => row.location || "未填写地点", "location"),
       date: groupRows(rows, (row) => row.entry_date || "未填日期", "date").sort((a, b) => {
         if (a.key === "未填日期") return 1;
         if (b.key === "未填日期") return -1;
@@ -532,7 +530,6 @@ export function normalizeRecordInput(body, formulas) {
     entry_date: String(body.entry_date ?? "").trim(),
     truck_model: String(body.truck_model ?? "").trim().slice(0, 64),
     customer_name: String(body.customer_name ?? "").trim().slice(0, 128),
-    location: String(body.location ?? "").trim().slice(0, 255),
     remark: String(body.remark ?? "").trim().slice(0, 1000),
     unit_price_override: null,
   };
@@ -586,14 +583,13 @@ function readFilters(url) {
     to: dateOnly(params.get("to")),
     customer: (params.get("customer") || "").trim(),
     model: (params.get("model") || "").trim(),
-    location: (params.get("location") || "").trim(),
     q: (params.get("q") || "").trim(),
     limit: Math.min(Number(params.get("limit")) || 5000, 20000),
   };
 }
 
 function buildCsv(rows) {
-  const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "施工地点", "备注"];
+  const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "备注"];
   const lines = [header.join(",")];
   for (const row of rows) {
     lines.push(
@@ -605,7 +601,6 @@ function buildCsv(rows) {
         row.volume,
         row.unit_price,
         row.amount,
-        row.location,
         row.remark,
       ]
         .map(csvCell)

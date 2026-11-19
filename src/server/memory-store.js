@@ -121,11 +121,10 @@ export class MemoryStore {
     if (filter.to) rows = rows.filter((row) => row.entry_date <= filter.to);
     if (filter.customer) rows = rows.filter((row) => row.customer_name === filter.customer);
     if (filter.model) rows = rows.filter((row) => row.truck_model === filter.model);
-    if (filter.location) rows = rows.filter((row) => row.location === filter.location);
     if (filter.q) {
       const q = filter.q;
       rows = rows.filter((row) =>
-        [row.customer_name, row.truck_model, row.location, row.remark].some((value) => String(value).includes(q)),
+        [row.customer_name, row.truck_model, row.remark].some((value) => String(value).includes(q)),
       );
     }
     rows.sort((a, b) => (a.entry_date < b.entry_date ? 1 : a.entry_date > b.entry_date ? -1 : b.id - a.id));
@@ -145,7 +144,6 @@ export class MemoryStore {
       truck_model: input.truck_model || "",
       customer_name: input.customer_name,
       volume: Number(input.volume),
-      location: input.location || "",
       remark: input.remark || "",
       unit_price_override: input.unit_price_override ?? null,
     };
@@ -162,7 +160,6 @@ export class MemoryStore {
       truck_model: input.truck_model || "",
       customer_name: input.customer_name,
       volume: Number(input.volume),
-      location: input.location || "",
       remark: input.remark || "",
       unit_price_override: input.unit_price_override ?? null,
     });

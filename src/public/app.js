@@ -5,7 +5,7 @@ const state = {
   tab: "entry",
   scope: "pump",
   editingId: null,
-  filters: { scope: "all", from: "", to: "", customer: "", model: "", location: "", q: "", quick: "month" },
+  filters: { scope: "all", from: "", to: "", customer: "", model: "", q: "", quick: "month" },
   dashboard: null,
   boardInitialized: false,
   page: 1,
@@ -156,7 +156,7 @@ function currentScope() {
 }
 
 function datalistsHtml() {
-  return ["customer", "truck_model", "location"]
+  return ["customer", "truck_model"]
     .map((kind) => {
       const options = (state.meta.dicts[kind] || [])
         .map((item) => `<option value="${esc(item.label)}"></option>`)
@@ -442,7 +442,7 @@ async function refreshRecent() {
         <table class="table">
           <thead><tr>
             <th>日期</th><th>客户名称</th><th>车型</th><th class="num">方量</th><th class="num">单价</th>
-            <th class="num">金额</th><th>施工地点</th><th>备注</th><th class="num">操作</th>
+            <th class="num">金额</th><th>备注</th><th class="num">操作</th>
           </tr></thead>
           <tbody>
             ${data.rows
@@ -455,7 +455,6 @@ async function refreshRecent() {
                 <td class="num">${fmt(row.volume, 3)}</td>
                 <td class="num">${fmt(row.unit_price)}</td>
                 <td class="num strong">${fmt(row.amount)}</td>
-                <td>${esc(row.location) || "—"}</td>
                 <td class="wrap muted">${esc(row.remark) || "—"}</td>
                 <td>
                   <div class="row-actions">
@@ -522,7 +521,6 @@ function defaultFilters() {
     to: today,
     customer: "",
     model: "",
-    location: "",
     q: "",
     quick: "month",
   };
@@ -596,7 +594,6 @@ function renderBoard() {
             </label>
             <label class="field"><span>客户名称</span><select id="f-customer">${options("customer", state.filters.customer)}</select></label>
             <label class="field"><span>车型</span><select id="f-model">${options("truck_model", state.filters.model)}</select></label>
-            <label class="field"><span>施工地点</span><select id="f-location">${options("location", state.filters.location)}</select></label>
             <label class="field grow"><span>搜索</span><input type="search" id="f-q" value="${esc(state.filters.q)}" placeholder="客户 / 备注 / 地点" /></label>
             <div class="btn-row">
               <button class="btn btn-primary" type="submit">查询</button>
@@ -640,13 +637,12 @@ function readFilters() {
   state.filters.scope = $("#f-scope")?.value || "all";
   state.filters.customer = $("#f-customer")?.value || "";
   state.filters.model = $("#f-model")?.value || "";
-  state.filters.location = $("#f-location")?.value || "";
   state.filters.q = ($("#f-q")?.value || "").trim();
 }
 
 function filterParams() {
   const params = new URLSearchParams();
-  for (const key of ["scope", "from", "to", "customer", "model", "location", "q"]) {
+  for (const key of ["scope", "from", "to", "customer", "model", "q"]) {
     if (state.filters[key]) params.set(key, state.filters[key]);
   }
   return params.toString();
@@ -699,7 +695,6 @@ function renderBoardBody() {
   const groupTabs = [
     ["customer", "按客户"],
     ["model", "按车型"],
-    ["location", "按施工地点"],
     ["date", "按日期"],
     ["scope", "按表"],
   ];
@@ -788,7 +783,7 @@ function renderDetailTable() {
         <table class="table">
           <thead><tr>
             <th>日期</th><th>表</th><th>车型</th><th>客户名称</th><th class="num">方量</th>
-            <th class="num">单价</th><th class="num">金额</th><th>施工地点</th><th>备注</th><th class="num">操作</th>
+            <th class="num">单价</th><th class="num">金额</th><th>备注</th><th class="num">操作</th>
           </tr></thead>
           <tbody>
             ${slice
@@ -802,7 +797,6 @@ function renderDetailTable() {
                 <td class="num">${fmt(row.volume, 3)}</td>
                 <td class="num">${fmt(row.unit_price)}</td>
                 <td class="num strong">${row.amount_error ? '<span class="badge badge-danger">公式错误</span>' : fmt(row.amount)}</td>
-                <td>${esc(row.location) || "—"}</td>
                 <td class="wrap muted">${esc(row.remark) || "—"}</td>
                 <td>
                   <div class="row-actions">
@@ -870,7 +864,7 @@ function renderConfig() {
 
       <div class="card">
         <div class="card-head">
-          <div><h2 class="card-title">名称配置</h2><p class="card-desc">客户名称、车型、施工地点都是可维护的选项，录入时也可直接输入新值并自动收录</p></div>
+          <div><h2 class="card-title">名称配置</h2><p class="card-desc">客户名称、车型都是可维护的选项，录入时也可直接输入新值并自动收录</p></div>
         </div>
         <div class="config-grid">
           ${Object.keys(meta.dictKinds)
@@ -1105,7 +1099,6 @@ async function testFormula(scopeKey) {
     entry_date: state.meta.today,
     truck_model: (dicts.truck_model[0] || {}).label || "",
     customer_name: (dicts.customer[0] || {}).label || "",
-    location: (dicts.location[0] || {}).label || "",
     remark: "12*2+11",
     volume: "",
   };

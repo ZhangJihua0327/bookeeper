@@ -1,4 +1,4 @@
-﻿/**
+/**
  * MySQL 数据访问层。所有方法都是异步的，接口保持窄而稳定，
  * 便于用内存实现（tests/memory-store.mjs）做无数据库测试。
  */
@@ -151,7 +151,7 @@ export class MysqlStore {
     const { where, params } = buildRecordFilter(filter);
     const limit = Math.min(Math.max(Number(filter.limit) || 5000, 1), 20000);
     const rows = await this.query(
-      `SELECT id, scope, entry_date, truck_model, customer_name, volume, location, remark, unit_price_override
+      `SELECT id, scope, entry_date, truck_model, customer_name, volume, remark, unit_price_override
        FROM records ${where} ORDER BY entry_date IS NULL, entry_date DESC, id DESC LIMIT ?`,
       [...params, limit],
     );
@@ -160,7 +160,7 @@ export class MysqlStore {
 
   async getRecord(id) {
     const rows = await this.query(
-      `SELECT id, scope, entry_date, truck_model, customer_name, volume, location, remark, unit_price_override
+      `SELECT id, scope, entry_date, truck_model, customer_name, volume, remark, unit_price_override
        FROM records WHERE id = ?`,
       [id],
     );
@@ -169,15 +169,14 @@ export class MysqlStore {
 
   async createRecord(input) {
     const result = await this.execute(
-      `INSERT INTO records (scope, entry_date, truck_model, customer_name, volume, location, remark, unit_price_override)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO records (scope, entry_date, truck_model, customer_name, volume, remark, unit_price_override)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         input.scope,
         input.entry_date || null,
         input.truck_model || "",
         input.customer_name,
         input.volume,
-        input.location || "",
         input.remark || "",
         input.unit_price_override ?? null,
       ],
@@ -188,14 +187,13 @@ export class MysqlStore {
   async updateRecord(id, input) {
     await this.execute(
       `UPDATE records SET scope = ?, entry_date = ?, truck_model = ?, customer_name = ?, volume = ?,
-        location = ?, remark = ?, unit_price_override = ? WHERE id = ?`,
+        remark = ?, unit_price_override = ? WHERE id = ?`,
       [
         input.scope,
         input.entry_date || null,
         input.truck_model || "",
         input.customer_name,
         input.volume,
-        input.location || "",
         input.remark || "",
         input.unit_price_override ?? null,
         id,
@@ -286,14 +284,10 @@ export function buildRecordFilter(filter = {}) {
     where.push("truck_model = ?");
     params.push(filter.model);
   }
-  if (filter.location) {
-    where.push("location = ?");
-    params.push(filter.location);
-  }
   if (filter.q) {
     const like = `%${filter.q}%`;
-    where.push("(customer_name LIKE ? OR truck_model LIKE ? OR location LIKE ? OR remark LIKE ?)");
-    params.push(like, like, like, like);
+    where.push("(customer_name LIKE ? OR truck_model LIKE ? OR remark LIKE ?)");
+    params.push(like, like, like);
   }
 
   return { where: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
@@ -307,7 +301,6 @@ function normalizeRecord(row) {
     truck_model: row.truck_model || "",
     customer_name: row.customer_name || "",
     volume: Number(row.volume) || 0,
-    location: row.location || "",
     remark: row.remark || "",
     unit_price_override:
       row.unit_price_override === null || row.unit_price_override === undefined

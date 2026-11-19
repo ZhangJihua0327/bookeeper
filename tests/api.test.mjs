@@ -88,7 +88,7 @@ test("meta 返回两张表的列、字典与公式", async () => {
 
   assert.deepEqual(data.scopes.map((scope) => scope.key), ["pump", "mixer"]);
   const pumpFields = data.scopes[0].fields.map((field) => field.label);
-  assert.deepEqual(pumpFields, ["日期", "车型", "客户名称", "方量", "施工地点", "备注"]);
+  assert.deepEqual(pumpFields, ["日期", "车型", "客户名称", "方量", "备注"]);
 
   assert.ok(data.variables.includes("方量"));
   assert.ok(data.variables.includes("单价"));
@@ -106,7 +106,6 @@ test("新增泵车记录：按公式算金额", async () => {
       truck_model: "三号",
       customer_name: "贾建",
       volume: 35,
-      location: "垫层",
     },
   });
   assert.equal(res.status, 201);
@@ -130,14 +129,14 @@ test("搅拌车记录：方量留空时用备注算式自动计算", async () =>
 test("校验：缺客户名 / 方量非法 / 日期格式错误", async () => {
   const noCustomer = await request("/api/records", {
     method: "POST",
-    body: { scope: "pump", entry_date: "2026-11-15", truck_model: "三号", volume: 10, location: "地坪" },
+    body: { scope: "pump", entry_date: "2026-11-15", truck_model: "三号", volume: 10 },
   });
   assert.equal(noCustomer.status, 400);
   assert.match(noCustomer.json.error, /客户名称不能为空/);
 
   const badDate = await request("/api/records", {
     method: "POST",
-    body: { scope: "pump", entry_date: "2026/11/15", truck_model: "三号", customer_name: "贾建", volume: 10, location: "地坪" },
+    body: { scope: "pump", entry_date: "2026/11/15", truck_model: "三号", customer_name: "贾建", volume: 10 },
   });
   assert.equal(badDate.status, 400);
   assert.match(badDate.json.error, /日期格式/);
@@ -179,7 +178,7 @@ test("CSV 导出带 BOM 与表头", async () => {
   assert.deepEqual([...bytes.slice(0, 3)], [0xef, 0xbb, 0xbf], "应以 UTF-8 BOM 开头，方便 Excel 识别");
 
   const text = new TextDecoder("utf-8").decode(bytes);
-  assert.match(text, /表,日期,车型,客户名称,方量,单价,金额,施工地点,备注/);
+  assert.match(text, /表,日期,车型,客户名称,方量,单价,金额,备注/);
   assert.match(text, /泵车,2026-11-15,三号,贾建,35,30,1050/);
 });
 
@@ -198,13 +197,13 @@ test("改单价后金额实时变化", async () => {
 test("修改与删除记录", async () => {
   const created = await request("/api/records", {
     method: "POST",
-    body: { scope: "pump", entry_date: "2026-11-16", truck_model: "一号", customer_name: "贾建", volume: 10, location: "地坪" },
+    body: { scope: "pump", entry_date: "2026-11-16", truck_model: "一号", customer_name: "贾建", volume: 10 },
   });
   const id = created.json.data.id;
 
   const updated = await request(`/api/records/${id}`, {
     method: "PUT",
-    body: { scope: "pump", entry_date: "2026-11-16", truck_model: "一号", customer_name: "贾建", volume: 20, location: "地坪" },
+    body: { scope: "pump", entry_date: "2026-11-16", truck_model: "一号", customer_name: "贾建", volume: 20 },
   });
   assert.equal(updated.json.data.volume, 20);
   assert.equal(updated.json.data.amount, 640);
@@ -287,7 +286,7 @@ test("CSV 列出两张表的列，不含驾驶员列", async () => {
     headers: { Cookie: cookie },
   });
   const text = new TextDecoder("utf-8").decode(new Uint8Array(await response.arrayBuffer()));
-  assert.match(text, /表,日期,车型,客户名称,方量,单价,金额,施工地点,备注/);
+  assert.match(text, /表,日期,车型,客户名称,方量,单价,金额,备注/);
   assert.equal(text.includes("驾驶员"), false);
 });
 
@@ -299,7 +298,6 @@ test("未填日期的存量记录不会让看板报错", async () => {
     truck_model: "二号",
     customer_name: "高飞",
     volume: 51,
-    location: "附房楼面",
     remark: "",
     driver: "",
     unit_price_override: null,

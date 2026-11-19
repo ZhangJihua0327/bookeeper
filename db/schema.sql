@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS dict_items (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  kind VARCHAR(32) NOT NULL COMMENT 'customer / truck_model / location',
+  kind VARCHAR(32) NOT NULL COMMENT 'customer / truck_model',
   scope VARCHAR(16) NOT NULL DEFAULT 'both' COMMENT 'pump / mixer / both',
   label VARCHAR(128) NOT NULL,
   sort_order INT NOT NULL DEFAULT 0,
@@ -41,7 +41,6 @@ CREATE TABLE IF NOT EXISTS records (
   truck_model VARCHAR(64) NOT NULL DEFAULT '',
   customer_name VARCHAR(128) NOT NULL DEFAULT '',
   volume DECIMAL(12,3) NOT NULL DEFAULT 0,
-  location VARCHAR(255) NOT NULL DEFAULT '',
   remark VARCHAR(1000) NOT NULL DEFAULT '',
   unit_price_override DECIMAL(12,2) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

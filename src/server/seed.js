@@ -7,7 +7,6 @@ const schemaPath = join(here, "..", "..", "db", "schema.sql");
 
 const SEED_CUSTOMERS = ["贾建", "朱水波", "汤建明", "徐功银", "新联搅拌站", "久拓"];
 const SEED_MODELS = ["一号", "二号", "三号"];
-const SEED_LOCATIONS = ["垫层", "地坪", "高小兵", "500", "新姚楼面"];
 
 export const DEFAULT_FORMULAS = {
   pump: { volume_formula: "方量", amount_formula: "方量 * 单价", amount_decimals: 2 },
@@ -38,9 +37,8 @@ export async function migrateAndSeed(store, log = console) {
     await store.seedDicts([
       ...SEED_CUSTOMERS.map((label, index) => ({ kind: "customer", scope: "both", label, sort_order: index })),
       ...SEED_MODELS.map((label, index) => ({ kind: "truck_model", scope: "both", label, sort_order: index })),
-      ...SEED_LOCATIONS.map((label, index) => ({ kind: "location", scope: "both", label, sort_order: index })),
     ]);
-    log.info?.("[seed] 初始化客户 / 车型 / 施工地点字典");
+    log.info?.("[seed] 初始化客户 / 车型字典");
   }
 
   const prices = await store.listPrices();
