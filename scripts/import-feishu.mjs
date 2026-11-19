@@ -206,8 +206,23 @@ async function main() {
     }
   }
 
-  await connection.end();
+  // 把已有记录里出现的客户 / 车型 / 施工地点补进字典，录入下拉框才能选到
+  if (APPLY) {
+    for (const [kind, column] of [
+      ["customer", "customer_name"],
+      ["truck_model", "truck_model"],
+      ["location", "location"],
+    ]) {
+      await connection.query(
+        `INSERT IGNORE INTO dict_items (kind, scope, label, sort_order)
+         SELECT DISTINCT ?, 'both', ${column}, 0 FROM records WHERE ${column} IS NOT NULL AND ${column} <> ''`,
+        [kind],
+      );
+    }
+    console.log("[import] 已按现有记录补齐客户 / 车型 / 施工地点字典");
+  }
 
+  await connection.end();
   console.log(
     `\n[import] ${APPLY ? "已导入" : "演练结果"}：可写入 ${inserted} 条，重复跳过 ${skipped} 条，字段不完整忽略 ${invalid} 条`,
   );

@@ -1,0 +1,5 @@
+# 统一按 LF 存储；Windows 检出时普通文本可转 CRLF，但 shell 脚本与 Dockerfile 必须保持 LF
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+docker-entrypoint* text eol=lf
