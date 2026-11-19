@@ -9,6 +9,7 @@ import {
   tokenize,
 } from "../src/server/formula.js";
 import { buildPriceIndex } from "../src/server/prices.js";
+import { DEFAULT_FORMULAS } from "../src/server/seed.js";
 
 const priceIndex = buildPriceIndex([
   { scope: "pump", customer_name: "贾建", truck_model: "*", price: 30 },
@@ -125,4 +126,19 @@ test("公式里不能执行任意代码", () => {
 test("数字字符串参与运算", () => {
   const result = computeAmount("方量 * 2", { ...values, 方量: "21.5" }, priceLookup);
   assert.equal(result.amount, 43);
+});
+
+test("业务默认公式：泵车起步价 800、蒲发 9/1 起 600、搅拌车 30 元/方", () => {
+  const noPrice = () => ({ price: 0, missing: false });
+  const pump = (row) => computeAmount(DEFAULT_FORMULAS.pump.amount_formula, row, noPrice).amount;
+
+  assert.equal(pump({ 方量: 8, 客户名称: "朱水波", 日期: "2026-11-15" }), 800, "8 方按起步价 800");
+  assert.equal(pump({ 方量: 50, 客户名称: "朱水波", 日期: "2026-11-15" }), 1000, "50 方按 20 元/方");
+  assert.equal(pump({ 方量: 40, 客户名称: "朱水波", 日期: "2026-11-15" }), 800, "40 方正好 800");
+
+  assert.equal(pump({ 方量: 10, 客户名称: "蒲发混凝土", 日期: "2026-09-01" }), 600, "蒲发 9/1 起起步价 600");
+  assert.equal(pump({ 方量: 40, 客户名称: "蒲发混凝土", 日期: "2026-09-01" }), 800, "蒲发超过 600 按方量");
+  assert.equal(pump({ 方量: 10, 客户名称: "蒲发混凝土", 日期: "2026-08-31" }), 800, "蒲发 9/1 前仍是 800");
+
+  assert.equal(computeAmount(DEFAULT_FORMULAS.mixer.amount_formula, { 方量: 35 }, noPrice).amount, 1050);
 });

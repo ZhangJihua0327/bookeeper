@@ -9,8 +9,19 @@ const SEED_CUSTOMERS = ["贾建", "朱水波", "汤建明", "徐功银", "新联
 const SEED_MODELS = ["一号", "二号", "三号"];
 
 export const DEFAULT_FORMULAS = {
-  pump: { volume_formula: "方量", amount_formula: "方量 * 单价", amount_decimals: 2 },
-  mixer: { volume_formula: "算式(备注)", amount_formula: "方量 * 单价", amount_decimals: 2 },
+  // 泵车：起步价 800，20 元/方取高；蒲发混凝土 2026-09-01 起起步价降为 600
+  pump: {
+    volume_formula: "方量",
+    amount_formula:
+      'if(客户名称 == "蒲发混凝土" && 日期 >= "2026-09-01", max(600, 20 * 方量), max(800, 20 * 方量))',
+    amount_decimals: 2,
+  },
+  // 搅拌车：30 元/方
+  mixer: {
+    volume_formula: "算式(备注)",
+    amount_formula: "30 * 方量",
+    amount_decimals: 2,
+  },
 };
 
 export function readSchema() {

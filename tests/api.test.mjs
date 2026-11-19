@@ -43,6 +43,9 @@ async function request(path, { method = "GET", body, auth = true } = {}) {
 before(async () => {
   store = new MemoryStore();
   await migrateAndSeed(store, silentLog);
+  // 金额相关的用例统一用最简单的 方量 * 单价，避免和业务默认公式耦合
+  await store.saveFormula({ scope: "pump", volume_formula: "方量", amount_formula: "方量 * 单价", amount_decimals: 2 });
+  await store.saveFormula({ scope: "mixer", volume_formula: "算式(备注)", amount_formula: "方量 * 单价", amount_decimals: 2 });
   await store.savePrice({ scope: "pump", customer_name: "*", truck_model: "*", price: 30, note: "默认" });
   await store.savePrice({ scope: "mixer", customer_name: "朱水波", truck_model: "*", price: 25, note: "" });
 

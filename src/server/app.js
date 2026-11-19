@@ -432,6 +432,7 @@ export function decorate(record, formulas, priceIndex) {
   const scope = isScope(record.scope) ? record.scope : "pump";
   const formula = formulas[scope] || DEFAULT_FORMULAS[scope];
   const values = toFormulaValues(scope, record);
+  const usesPrice = String(formula.amount_formula).includes("单价");
 
   const price =
     record.unit_price_override !== null && record.unit_price_override !== undefined
@@ -452,7 +453,7 @@ export function decorate(record, formulas, priceIndex) {
     scope_label: SCOPES[scope].label,
     amount: result.amount,
     unit_price: price.price,
-    price_missing: price.missing,
+    price_missing: usesPrice ? price.missing : false,
     amount_error: result.error,
   };
 }
@@ -496,7 +497,9 @@ export function buildDashboard(rows, context) {
       scope: groupRows(rows, (row) => row.scope_label || row.scope, "scope"),
     },
     rows,
-    priceConfigured: SCOPE_KEYS.some((key) => context.priceIndex.hasPositive(key)),
+    priceConfigured:
+      !SCOPE_KEYS.some((key) => String(context.formulas[key]?.amount_formula || "").includes("单价")) ||
+      SCOPE_KEYS.some((key) => context.priceIndex.hasPositive(key)),
   };
 }
 
