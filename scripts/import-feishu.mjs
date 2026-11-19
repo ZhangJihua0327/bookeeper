@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
- * 一次性把飞书多维表格里的历史数据导入本服务的 MySQL。
+ * 把飞书多维表格里的历史数据同步到本服务的 MySQL。
  *
- * 默认是“演练模式”，只统计不写入；确认无误后加 --apply 真正导入。
+ * 幂等：以飞书 record_id 作为 source_key 做 upsert，重复执行只会更新、不会重复插入。
+ * 保留全部记录（包括方量/客户/日期为空的行），不做任何“看起来像重复”的内容去重。
  *
  * 用法：
- *   docker compose exec bookeeper node scripts/import-feishu.mjs            # 演练
- *   docker compose exec bookeeper node scripts/import-feishu.mjs --apply    # 导入
- *
- * 需要的环境变量见 .env.example 里 FEISHU_* / BITABLE_* / *_FIELD_* 段。
+ *   node scripts/import-feishu.mjs            # 演练：只统计
+ *   node scripts/import-feishu.mjs --apply    # 真正写入
  */
 
 import mysql from "mysql2/promise";
@@ -36,6 +35,7 @@ const tables = [
       volume: env.PUMP_FIELD_VOLUME || "方量",
       location: env.PUMP_FIELD_LOCATION || "施工地点",
       remark: env.PUMP_FIELD_REMARK || "备注",
+      driver: env.PUMP_FIELD_DRIVERS || "驾驶员",
     },
   },
   {
@@ -46,6 +46,7 @@ const tables = [
       customer_name: env.MIXER_FIELD_CUSTOMER_NAME || "客户名称",
       volume: env.MIXER_FIELD_VOLUME || "方量",
       remark: env.MIXER_FIELD_REMARK || "备注",
+      driver: env.MIXER_FIELD_DRIVERS || "驾驶员",
       truck_model: env.MIXER_FIELD_TRUCK_MODEL || "车型",
       location: env.MIXER_FIELD_LOCATION || "施工地点",
     },
@@ -61,7 +62,7 @@ function textValue(value) {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value.trim();
   if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join("");
+  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join("、");
   if (typeof value === "object") {
     return textValue(value.text ?? value.name ?? value.value ?? "");
   }
@@ -69,7 +70,7 @@ function textValue(value) {
 }
 
 function numberValue(value) {
-  if (typeof value === "number") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   const parsed = Number(textValue(value));
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -129,16 +130,17 @@ async function listRecords(token, tableId) {
 
 function mapRecord(scope, record, fields) {
   const raw = record.fields || {};
-  const volume = numberValue(raw[fields.volume]);
+  const recordId = record.record_id || record.recordId || "";
   return {
     scope,
-    entry_date: dateValue(raw[fields.date]),
-    truck_model: textValue(raw[fields.truck_model]),
-    customer_name: textValue(raw[fields.customer_name]),
-    volume,
-    location: textValue(raw[fields.location]),
-    remark: textValue(raw[fields.remark]),
-    unit_price_override: null,
+    source_key: recordId ? `feishu:${recordId}` : null,
+    entry_date: dateValue(raw[fields.date]) || null,
+    truck_model: textValue(raw[fields.truck_model]).slice(0, 64),
+    customer_name: textValue(raw[fields.customer_name]).slice(0, 128),
+    volume: numberValue(raw[fields.volume]),
+    location: textValue(raw[fields.location]).slice(0, 255),
+    remark: textValue(raw[fields.remark]).slice(0, 1000),
+    driver: textValue(raw[fields.driver]).slice(0, 255),
   };
 }
 
@@ -163,50 +165,72 @@ async function main() {
     dateStrings: true,
   });
 
-  const [existing] = await connection.query(
-    "SELECT scope, entry_date, customer_name, volume, remark FROM records",
-  );
-  const seen = new Set(
-    existing.map(
-      (row) =>
-        `${row.scope}|${String(row.entry_date).slice(0, 10)}|${row.customer_name}|${Number(row.volume)}|${row.remark || ""}`,
-    ),
-  );
+  const INSERT_SQL = `
+    INSERT INTO records
+      (scope, entry_date, truck_model, customer_name, volume, location, remark, driver, source_key)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      entry_date = VALUES(entry_date),
+      truck_model = VALUES(truck_model),
+      customer_name = VALUES(customer_name),
+      volume = VALUES(volume),
+      location = VALUES(location),
+      remark = VALUES(remark),
+      driver = VALUES(driver)`;
 
+  let fetched = 0;
+  let written = 0;
   let inserted = 0;
-  let skipped = 0;
-  let invalid = 0;
+  let updated = 0;
+  let blank = 0;
+  let noSourceKey = 0;
 
   for (const table of tables) {
     const records = await listRecords(token, table.tableId);
-    console.log(`\n[import] ${table.scope}：飞书返回 ${records.length} 条`);
+    fetched += records.length;
+    console.log(`[import] ${table.scope}：飞书返回 ${records.length} 条`);
 
     for (const record of records) {
       const row = mapRecord(table.scope, record, table.fields);
-      if (!row.entry_date || !row.customer_name || !(row.volume > 0)) {
-        invalid += 1;
+      if (!row.source_key) {
+        noSourceKey += 1;
         continue;
       }
-
-      const key = `${row.scope}|${row.entry_date}|${row.customer_name}|${row.volume}|${row.remark}`;
-      if (seen.has(key)) {
-        skipped += 1;
+      // 跳过整行都空的记录（飞书里偶尔留下的空行），其余一律保留
+      const isEmpty =
+        !row.entry_date &&
+        !row.customer_name &&
+        !row.volume &&
+        !row.remark &&
+        !row.location &&
+        !row.truck_model &&
+        !row.driver;
+      if (isEmpty) {
+        blank += 1;
         continue;
       }
-      seen.add(key);
 
       if (APPLY) {
-        await connection.execute(
-          `INSERT INTO records (scope, entry_date, truck_model, customer_name, volume, location, remark, unit_price_override)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-          [row.scope, row.entry_date, row.truck_model, row.customer_name, row.volume, row.location, row.remark],
-        );
+        const [result] = await connection.execute(INSERT_SQL, [
+          row.scope,
+          row.entry_date,
+          row.truck_model,
+          row.customer_name,
+          row.volume,
+          row.location,
+          row.remark,
+          row.driver,
+          row.source_key,
+        ]);
+        // affectedRows: 1=新增, 2=更新, 0=内容无变化
+        if (result.affectedRows === 1) inserted += 1;
+        else if (result.affectedRows === 2) updated += 1;
       }
-      inserted += 1;
+      written += 1;
     }
   }
 
-  // 把已有记录里出现的客户 / 车型 / 施工地点补进字典，录入下拉框才能选到
+  // 把记录里出现的客户 / 车型 / 施工地点 / 驾驶员补进字典，录入下拉框才选得到
   if (APPLY) {
     for (const [kind, column] of [
       ["customer", "customer_name"],
@@ -219,12 +243,30 @@ async function main() {
         [kind],
       );
     }
-    console.log("[import] 已按现有记录补齐客户 / 车型 / 施工地点字典");
+
+    const [driverRows] = await connection.query("SELECT DISTINCT driver FROM records WHERE driver <> ''");
+    const drivers = new Set();
+    for (const { driver } of driverRows) {
+      for (const name of String(driver).split(/[、,，;；\s]+/)) {
+        if (name.trim()) drivers.add(name.trim());
+      }
+    }
+    for (const name of drivers) {
+      await connection.execute(
+        "INSERT IGNORE INTO dict_items (kind, scope, label, sort_order) VALUES ('driver', 'mixer', ?, 0)",
+        [name.slice(0, 128)],
+      );
+    }
+    console.log(`[import] 已补齐字典：驾驶员 ${drivers.size} 人`);
   }
 
   await connection.end();
+
   console.log(
-    `\n[import] ${APPLY ? "已导入" : "演练结果"}：可写入 ${inserted} 条，重复跳过 ${skipped} 条，字段不完整忽略 ${invalid} 条`,
+    `\n[import] ${APPLY ? "已同步" : "演练结果"}：飞书共 ${fetched} 条，可写入 ${written} 条` +
+      (APPLY ? `（新增 ${inserted}，更新 ${updated}）` : "") +
+      (blank ? `，空白行跳过 ${blank} 条` : "") +
+      (noSourceKey ? `，缺 record_id 跳过 ${noSourceKey} 条` : ""),
   );
   if (!APPLY) {
     console.log("[import] 确认无误后加 --apply 真正写入：node scripts/import-feishu.mjs --apply");

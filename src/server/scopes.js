@@ -26,6 +26,7 @@ export const SCOPES = {
       { key: "customer_name", label: "客户名称", type: "dict", dict: "customer", required: true },
       { key: "volume", label: "方量", type: "number", required: true, hint: "留空时按备注里的算式自动计算" },
       { key: "remark", label: "备注", type: "text", required: true, placeholder: "12*2+11" },
+      { key: "driver", label: "驾驶员", type: "dict", dict: "driver", required: false, placeholder: "多人用顿号分隔" },
       { key: "truck_model", label: "车型", type: "dict", dict: "truck_model", required: false },
       { key: "location", label: "施工地点", type: "dict", dict: "location", required: false },
     ],
@@ -38,6 +39,7 @@ export const DICT_KINDS = {
   customer: { label: "客户名称", scopes: ["pump", "mixer"] },
   truck_model: { label: "车型", scopes: ["pump", "mixer"] },
   location: { label: "施工地点", scopes: ["pump", "mixer"] },
+  driver: { label: "驾驶员", scopes: ["mixer"] },
 };
 
 export function isScope(value) {

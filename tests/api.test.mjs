@@ -281,3 +281,48 @@ test("阻断路径穿越", async () => {
   const res = await request("/%2e%2e/%2e%2e/package.json", { auth: false });
   assert.ok([403, 404].includes(res.status));
 });
+
+test("驾驶员字段可写入，并出现在 CSV 里", async () => {
+  const created = await request("/api/records", {
+    method: "POST",
+    body: {
+      scope: "mixer",
+      entry_date: "2026-10-05",
+      customer_name: "汤建明",
+      remark: "9+8",
+      driver: "余兵、薛冒元",
+    },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.json.data.driver, "余兵、薛冒元");
+
+  const response = await fetch(`${base}/api/export.csv?from=2026-10-01&to=2026-10-31`, {
+    headers: { Cookie: cookie },
+  });
+  const text = new TextDecoder("utf-8").decode(new Uint8Array(await response.arrayBuffer()));
+  assert.match(text, /备注,驾驶员/);
+  assert.match(text, /余兵、薛冒元/);
+});
+
+test("未填日期的存量记录不会让看板报错", async () => {
+  store.records.push({
+    id: 90001,
+    scope: "pump",
+    entry_date: "",
+    truck_model: "二号",
+    customer_name: "高飞",
+    volume: 51,
+    location: "附房楼面",
+    remark: "",
+    driver: "",
+    unit_price_override: null,
+  });
+
+  const all = await request("/api/dashboard");
+  assert.equal(all.status, 200);
+  assert.ok(all.json.data.groups.date.some((group) => group.key === "未填日期"));
+
+  const ranged = await request("/api/dashboard?from=2026-11-01&to=2026-11-30");
+  assert.equal(ranged.status, 200);
+  assert.equal(ranged.json.data.rows.some((row) => row.customer_name === "高飞"), false);
+});

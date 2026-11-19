@@ -490,7 +490,11 @@ export function buildDashboard(rows, context) {
       customer: groupRows(rows, (row) => row.customer_name || "未填写客户", "customer"),
       model: groupRows(rows, (row) => row.truck_model || "未填写车型", "model"),
       location: groupRows(rows, (row) => row.location || "未填写地点", "location"),
-      date: groupRows(rows, (row) => row.entry_date || "", "date").sort((a, b) => (a.key < b.key ? -1 : 1)),
+      date: groupRows(rows, (row) => row.entry_date || "未填日期", "date").sort((a, b) => {
+        if (a.key === "未填日期") return 1;
+        if (b.key === "未填日期") return -1;
+        return a.key < b.key ? -1 : 1;
+      }),
       scope: groupRows(rows, (row) => row.scope_label || row.scope, "scope"),
     },
     rows,
@@ -530,6 +534,7 @@ export function normalizeRecordInput(body, formulas) {
     customer_name: String(body.customer_name ?? "").trim().slice(0, 128),
     location: String(body.location ?? "").trim().slice(0, 255),
     remark: String(body.remark ?? "").trim().slice(0, 1000),
+    driver: String(body.driver ?? "").trim().slice(0, 255),
     unit_price_override: null,
   };
 
@@ -589,7 +594,7 @@ function readFilters(url) {
 }
 
 function buildCsv(rows) {
-  const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "施工地点", "备注"];
+  const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "施工地点", "备注", "驾驶员"];
   const lines = [header.join(",")];
   for (const row of rows) {
     lines.push(
@@ -603,6 +608,7 @@ function buildCsv(rows) {
         row.amount,
         row.location,
         row.remark,
+        row.driver,
       ]
         .map(csvCell)
         .join(","),
