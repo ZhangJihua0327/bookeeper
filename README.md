@@ -1,137 +1,123 @@
-﻿# Bookeeper
+# Bookeeper
 
-TypeScript + Node.js 前后端一体的车辆记账应用，直接写入飞书多维表格，并生成昨日作业内容报表。
+泵车 / 搅拌车 记账与看板。Node.js + MySQL，单页前端，无构建步骤，运行时只依赖 `mysql2`。
 
-## 表结构
+线上地址：<https://bookeeper.lollipopzzz.cn>
 
-泵车表：
+## 两张表
 
-- 日期
-- 车型
-- 客户名称
-- 方量
-- 施工地点
+| 表 | 列 |
+| --- | --- |
+| 泵车表 | 日期、车型、客户名称、方量、施工地点、备注（选填） |
+| 搅拌车表 | 日期、客户名称、方量、备注、车型（选填）、施工地点（选填） |
 
-搅拌车表：
+搅拌车的方量可以留空：备注里写 `12*2+11` 这类算式，服务端按“方量公式”自动算出 35。
 
-- 日期
-- 客户名称
-- 方量
-- 备注：每行按“驾驶员：每车方量算式”记录运输明细
-- 驾驶员：多选字段，由备注明细自动生成
+## 功能
 
-搅拌车记账页按驾驶员展开运输明细，每车方量仅支持数字、加号和乘号（如 `12+8×2`）。页面会自动计算总方量并汇总驾驶员，提交到飞书时仍使用上述原有字段，不改变多维表结构。
+- **录入**：两张表分别填写，实时显示方量 / 单价 / 金额；支持编辑、删除。
+- **看板**：按日期区间、表、客户、车型、施工地点、关键词筛选；总方量 / 总金额 / 记录数 / 客户数 / 平均单价；按客户、车型、地点、日期、表分组汇总；明细分页；导出 CSV（带 BOM，Excel 直接打开）。
+- **配置**：
+  - 客户名称、车型、施工地点三个字典都可以增删，录入时输入新值也会自动收录；
+  - 单价按「客户 + 车型」配置，未命中时依次回退到客户默认、车型默认、全局默认（`*`）；
+  - **公式可配置**，变量就是表里的列名：
 
-字段名可通过 `.env` 覆盖，默认值见 `.env.example`。
+    | 列 | 说明 |
+    | --- | --- |
+    | `日期` `车型` `客户名称` `方量` `施工地点` `备注` | 当前行的列值 |
+    | `单价` | 按当前行客户 / 车型查出来的单价 |
+
+    支持的函数：`单价(客户[, 车型])`、`算式(备注)`、`round(x, n)`、`if(条件, 成立, 否则)`、`max` / `min` / `abs` / `sum`。
+
+    默认配置：
+
+    | 表 | 方量公式 | 金额公式 |
+    | --- | --- | --- |
+    | 泵车 | `方量` | `方量 * 单价` |
+    | 搅拌车 | `算式(备注)` | `方量 * 单价` |
+
+    公式由自研的词法/语法分析器求值，**不使用 `eval`**，只允许算术、比较、逻辑运算和上面这些函数。
 
 ## 本地运行
 
 ```bash
 cp .env.example .env
-npm start
-```
-
-`npm start` 会先把 `src/` 下的 TypeScript 构建到 `dist/`，再启动服务。打开 `http://localhost:3000`。
-
-## 必填配置
-
-```bash
-FEISHU_APP_ID=
-FEISHU_APP_SECRET=
-BITABLE_APP_TOKEN=
-PUMP_TRUCK_TABLE_ID=
-MIXER_TRUCK_TABLE_ID=
-```
-
-本地真实配置写在 `.env`，该文件已加入 `.gitignore`，不要提交。飞书应用需要具备多维表格记录读取和写入权限，并能访问对应多维表格。
-
-
-## Docker Compose
-
-Compose 构建应用镜像，应用仅在 Docker 外部网络 `web` 中暴露 3000 端口。首次启动前创建网络：
-
-```bash
-docker network create web
+docker network create web   # 首次
 docker compose up -d --build
 ```
 
-生产流量由独立网关转发到 `bookeeper:3000`，应用本身不绑定宿主机端口。
+打开 <http://localhost:3000>。也可以不用 Docker，改 `.env` 里的 `DB_HOST` 指向本机 MySQL 后 `npm install && npm start`。
 
-
-
-## 独立 HTTPS 网关
-
-Nginx 和 Certbot 在服务器上的独立 Compose 项目 `~/gateway` 中运行，不属于本应用，也不随本应用部署。生产域名 `bookeeper.lollipopzzz.cn` 的站点配置通过共享 Docker 网络 `web` 访问 `bookeeper:3000`。
-
-DNS 先把 `bookeeper.lollipopzzz.cn` 的 A 记录解析到云服务器公网 IP，并确认服务器安全组开放 80 和 443。
-
-接入其他应用时，让应用加入外部网络 `web`，然后在网关中增加一个站点配置，例如：
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name service.lollipopzzz.cn;
-
-    ssl_certificate /etc/letsencrypt/live/service.lollipopzzz.cn/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/service.lollipopzzz.cn/privkey.pem;
-
-    location / {
-        proxy_pass http://service:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-新域名需先添加指向服务器的 DNS 记录，再由网关签发证书：
+测试：
 
 ```bash
-cd ~/gateway
-docker compose run --rm certbot certonly --webroot -w /var/www/certbot \
-  -d service.lollipopzzz.cn --email YOUR_EMAIL --agree-tos --no-eff-email
-docker compose exec nginx nginx -s reload
+npm test        # 公式引擎 + API 端到端（内存 store，不需要数据库）
 ```
 
-证书续期由独立网关的 Certbot 容器负责。应用部署完成后，`scripts/deploy.sh` 会执行
-`nginx -t` 并 reload 独立网关，让 Nginx 重新解析可能已变更的 `bookeeper` 容器地址。
-网关目录默认是 `~/gateway`，也可以通过服务器环境变量 `GATEWAY_PATH` 覆盖。
-部署脚本随后会从后端容器本机和 Nginx 容器读取 `/api/options`，GitHub Runner 再从公网域名
-进行最多 5 次探测。任一只读探测失败时，Actions 会输出 bookeeper 与 Nginx 的最近日志并
-标记部署检查失败。
-## GitHub 自动部署
+## 环境变量
 
-服务器准备：
+| 变量 | 说明 |
+| --- | --- |
+| `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | 数据库密码（必填） |
+| `MYSQL_DATABASE` / `MYSQL_USER` | 默认 `bookeeper` |
+| `APP_PASSWORD` | 访问密码；留空则不做校验 |
+| `SESSION_SECRET` | 会话签名密钥（必填，改掉会让已登录用户失效） |
+| `TIME_ZONE` | 默认 `Asia/Shanghai` |
+| `FEISHU_*` / `BITABLE_*` / `*_FIELD_*` | 仅一次性导入历史数据时需要 |
+
+## 部署
+
+生产部署仍由 GitHub Actions 完成（`.github/workflows/deploy.yml`）：push 到 `main` → Actions SSH 到服务器 → `git reset --hard origin/main` → 执行 `scripts/deploy.sh`。
+
+`scripts/deploy.sh` 做的事：
+
+1. 把服务器上的 `$HOME/.bookeeper_env` 复制成 `.env`（运行时配置不随仓库走）；
+2. 检查必填变量，确保外部网络 `web` 存在；
+3. `docker compose build && docker compose up -d --remove-orphans`（旧的 `bookeeper` 容器会被同名服务替换，MySQL 首次启动自动建库）；
+4. 轮询 `/api/health` 直到就绪，失败则打印日志并返回非零；
+5. reload 独立网关 `~/gateway` 里的 nginx（容器 IP 变了必须 reload）；
+6. 输出 `docker compose ps`。
+
+服务器上需要存在 `$HOME/.bookeeper_env`，至少包含：
 
 ```bash
-git clone <你的仓库地址> /opt/bookeeper
-cd /opt/bookeeper
-cp .env.example .env
-# 编辑 .env，填入飞书配置
-docker compose up -d --build
+MYSQL_ROOT_PASSWORD=...
+MYSQL_PASSWORD=...
+SESSION_SECRET=...
+APP_PASSWORD=...
 ```
 
-GitHub 仓库添加 Actions Secrets：
+## 一次性导入飞书历史数据
 
-- `DEPLOY_HOST`：服务器 IP 或域名
-- `DEPLOY_USER`：SSH 用户
-- `DEPLOY_SSH_KEY`：该用户的私钥内容
-- `DEPLOY_PORT`：SSH 端口，默认 22
-- `DEPLOY_PATH`：服务器上的项目目录，例如 `/opt/bookeeper`
+```bash
+docker compose exec bookeeper node scripts/import-feishu.mjs           # 演练：只统计
+docker compose exec bookeeper node scripts/import-feishu.mjs --apply   # 真正写入
+```
 
-之后每次 push 到 `main` 或 `master`，`.github/workflows/deploy.yml` 会自动 SSH 到服务器并执行 `scripts/deploy.sh`，完成 `docker compose build` 和 `docker compose up -d --remove-orphans`。
+按「表 + 日期 + 客户 + 方量 + 备注」去重，重复执行不会产生重复记录。
+
+## 目录结构
+
+```
+src/server/    HTTP 服务、公式引擎、数据访问、鉴权
+src/public/    单页前端（index.html / app.js / styles.css）
+db/schema.sql  建表语句（幂等，启动时自动执行）
+scripts/       deploy.sh、飞书数据导入
+tests/         公式与 API 测试
+```
+
 ## API
 
-- `POST /api/records/pump-truck`：提交泵车记录
-- `POST /api/records/mixer-truck`：提交搅拌车记录
-- `GET /api/report/yesterday`：按昨日生成作业报表
-- `GET /api/report/yesterday?date=YYYY-MM-DD`：按指定日期生成作业报表
-- GET /api/health：检查配置和字段映射
-- GET /api/options：读取飞书字段下拉选项
-- POST /api/options：新增字段下拉选项
-
-下拉选项在服务端缓存 5 分钟；实际新增字段选项后缓存会立即失效。记录提交支持前端生成的
-`submissionId`，同一实例在 10 分钟内收到相同 ID 和内容时会复用首次执行结果，降低连接中断后
-重复提交造成重复记录的风险。
-
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/health` | 存活探针（含数据库连通性） |
+| GET | `/api/meta` | 表结构、字典、公式、单价 |
+| GET | `/api/records` | 记录列表（支持 scope/from/to/customer/model/location/q） |
+| POST | `/api/records` | 新增记录 |
+| PUT / DELETE | `/api/records/:id` | 修改 / 删除 |
+| GET | `/api/dashboard` | 看板汇总（KPI + 分组 + 明细） |
+| GET | `/api/export.csv` | 导出 CSV |
+| POST | `/api/evaluate` | 公式试算（录入页实时预览、配置页测试都走这里） |
+| POST / DELETE | `/api/dicts`、`/api/dicts/:id` | 字典维护 |
+| POST / PUT / DELETE | `/api/prices`、`/api/prices/:id` | 单价维护 |
+| PUT | `/api/formulas` | 保存公式 |

@@ -1,22 +1,97 @@
+name: bookeeper
+
 services:
+  mysql:
+    image: mysql:8.0.35
+    container_name: bookeeper-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+      - --max-connections=50
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-bookeeper}
+      MYSQL_USER: ${MYSQL_USER:-bookeeper}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   bookeeper:
     build:
       context: .
       dockerfile: Dockerfile
-    image: bookeeper:node-lts-alpine
+    image: bookeeper:app-v2
     container_name: bookeeper
     restart: unless-stopped
-    expose:
-      - "3000"
-    env_file:
-      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
     environment:
       PORT: "3000"
       TZ: Asia/Shanghai
+      TIME_ZONE: Asia/Shanghai
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${MYSQL_DATABASE:-bookeeper}
+      DB_USER: ${MYSQL_USER:-bookeeper}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      APP_PASSWORD: ${APP_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET}
+      # 仅用于一次性导入飞书历史数据（scripts/import-feishu.mjs），平时不会被应用使用
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_BASE_URL: ${FEISHU_BASE_URL:-https://open.feishu.cn}
+      BITABLE_APP_TOKEN: ${BITABLE_APP_TOKEN:-}
+      PUMP_TRUCK_TABLE_ID: ${PUMP_TRUCK_TABLE_ID:-}
+      MIXER_TRUCK_TABLE_ID: ${MIXER_TRUCK_TABLE_ID:-}
+      PUMP_FIELD_DATE: ${PUMP_FIELD_DATE:-日期}
+      PUMP_FIELD_TRUCK_MODEL: ${PUMP_FIELD_TRUCK_MODEL:-车型}
+      PUMP_FIELD_CUSTOMER_NAME: ${PUMP_FIELD_CUSTOMER_NAME:-客户名称}
+      PUMP_FIELD_VOLUME: ${PUMP_FIELD_VOLUME:-方量}
+      PUMP_FIELD_LOCATION: ${PUMP_FIELD_LOCATION:-施工地点}
+      PUMP_FIELD_REMARK: ${PUMP_FIELD_REMARK:-备注}
+      MIXER_FIELD_DATE: ${MIXER_FIELD_DATE:-日期}
+      MIXER_FIELD_CUSTOMER_NAME: ${MIXER_FIELD_CUSTOMER_NAME:-客户名称}
+      MIXER_FIELD_VOLUME: ${MIXER_FIELD_VOLUME:-方量}
+      MIXER_FIELD_REMARK: ${MIXER_FIELD_REMARK:-备注}
+      MIXER_FIELD_TRUCK_MODEL: ${MIXER_FIELD_TRUCK_MODEL:-车型}
+      MIXER_FIELD_LOCATION: ${MIXER_FIELD_LOCATION:-施工地点}
+    expose:
+      - "3000"
     networks:
+      - internal
       - web
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
+  internal:
+    name: bookeeper-internal
   web:
     external: true
     name: web
+
+volumes:
+  mysql-data:
+    name: bookeeper-mysql-data

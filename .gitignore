@@ -1,20 +1,16 @@
-﻿node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+# 依赖与构建产物
+node_modules/
+dist/
+coverage/
 
+# 本地运行时配置（生产配置在服务器的 $HOME/.bookeeper_env）
 .env
 .env.local
 
+# 编辑器 / 本地工具
 .idea/
 .vscode/
 .qoder/
 
-dist/
-coverage/
 *.log
-certbot/conf/
-certbot/www/
-nginx/conf.d/default.conf
-certbot-renew.log
+npm-debug.log*

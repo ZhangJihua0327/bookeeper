@@ -1,17 +1,19 @@
-﻿FROM node:lts-alpine
+FROM node:lts-alpine
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV TZ=Asia/Shanghai
-ENV PORT=3000
+ENV NODE_ENV=production \
+    TZ=Asia/Shanghai
 
 COPY package.json ./
-COPY scripts ./scripts
-COPY src ./src
+RUN npm install --omit=dev --no-audit --no-fund
 
-RUN npm run build
+COPY --chown=node:node src ./src
+COPY --chown=node:node db ./db
+COPY --chown=node:node scripts ./scripts
 
 EXPOSE 3000
 
-CMD ["node", "dist/server/index.js"]
+USER node
+
+CMD ["node", "src/server/index.js"]
