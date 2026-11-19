@@ -145,7 +145,7 @@ export class MemoryStore {
       customer_name: input.customer_name,
       volume: Number(input.volume),
       remark: input.remark || "",
-      unit_price_override: input.unit_price_override ?? null,
+      amount_override: input.amount_override ?? null,
     };
     this.records.push(row);
     return { ...row };
@@ -161,7 +161,7 @@ export class MemoryStore {
       customer_name: input.customer_name,
       volume: Number(input.volume),
       remark: input.remark || "",
-      unit_price_override: input.unit_price_override ?? null,
+      amount_override: input.amount_override ?? null,
     });
     return { ...row };
   }

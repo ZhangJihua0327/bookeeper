@@ -174,7 +174,9 @@ function fieldHtml(field) {
   if (field.type === "date") {
     control = `<input id="${id}" data-field="${field.key}" type="date" value="${esc(state.meta.today)}" />`;
   } else if (field.type === "number") {
-    control = `<input id="${id}" data-field="${field.key}" type="number" step="0.001" min="0" placeholder="0" />`;
+    control = `<input id="${id}" data-field="${field.key}" type="number" step="0.01" min="0" placeholder="${esc(
+      field.placeholder || "0",
+    )}" />`;
   } else if (field.type === "dict") {
     control = `<input id="${id}" data-field="${field.key}" type="text" list="dl-${field.dict}" placeholder="选择或直接输入" />`;
   } else {
@@ -216,6 +218,14 @@ function renderEntry() {
         <form id="entry-form" autocomplete="off">
           <div class="form-grid">
             ${scope.fields.map((field) => fieldHtml(field)).join("")}
+            ${fieldHtml({
+              key: "amount_override",
+              label: "金额（选填）",
+              type: "number",
+              required: false,
+              placeholder: "留空自动算",
+              hint: "留空按公式计算，填写则以此为准",
+            })}
           </div>
 
           <div class="live-bar" id="live-bar">
@@ -288,6 +298,9 @@ function readEntryForm() {
       data[field.key] = raw.trim();
     }
   }
+
+  const overrideInput = $("#f-amount_override");
+  data.amount_override = overrideInput ? overrideInput.value.trim() : "";
   return data;
 }
 
@@ -299,6 +312,8 @@ function resetForm() {
     input.value = field.type === "date" ? state.meta.today : "";
     input.classList.remove("is-invalid");
   }
+  const amountInput = $("#f-amount_override");
+  if (amountInput) amountInput.value = "";
   updateLive();
 }
 
@@ -368,13 +383,19 @@ async function updateLive() {
 
   setLive("volume", volume === null ? "—" : fmt(volume, 3));
   setLive("price", price === null ? "—" : fmt(price));
-  setLive("amount", amount === null ? "—" : fmt(amount));
+
+  const overrideRaw = String(row.amount_override ?? "").trim();
+  const manual = overrideRaw === "" ? null : Number(overrideRaw);
+  const manualActive = manual !== null && Number.isFinite(manual) && manual >= 0;
+  const effective = manualActive ? manual : amount;
+  setLive("amount", effective === null ? "—" : fmt(effective));
 
   const note = $('[data-live="note"]');
   if (note) {
     let text = "";
     if (volumeError) text = `方量公式：${volumeError}`;
     else if (amountError) text = `金额公式：${amountError}`;
+    else if (manualActive) text = `手动金额（公式值 ${amount === null ? "—" : fmt(amount)} 元）`;
     else if (priceMissing) text = "未匹配到单价，请到配置页设置";
     else if (volumeNote) text = volumeNote;
     note.textContent = text;
@@ -386,6 +407,7 @@ async function submitEntry(event) {
   const row = readEntryForm();
   const payload = { ...row };
   if (payload.volume === "") delete payload.volume;
+  if (payload.amount_override === "") delete payload.amount_override;
 
   const button = $('#entry-form button[type="submit"]');
   button.disabled = true;
@@ -454,7 +476,9 @@ async function refreshRecent() {
                 <td>${esc(row.truck_model) || "—"}</td>
                 <td class="num">${fmt(row.volume, 3)}</td>
                 <td class="num">${fmt(row.unit_price)}</td>
-                <td class="num strong">${fmt(row.amount)}</td>
+                <td class="num strong">${fmt(row.amount)}${
+                  row.amount_source === "manual" ? ' <span class="badge badge-warn">手动</span>' : ""
+                }</td>
                 <td class="wrap muted">${esc(row.remark) || "—"}</td>
                 <td>
                   <div class="row-actions">
@@ -494,6 +518,12 @@ function startEdit(id, rows) {
     const input = $(`#f-${field.key}`);
     if (!input) continue;
     input.value = row[field.key] ?? "";
+  }
+
+  const amountInput = $("#f-amount_override");
+  if (amountInput) {
+    amountInput.value =
+      row.amount_override === null || row.amount_override === undefined ? "" : row.amount_override;
   }
 
   updateLive();
@@ -796,7 +826,11 @@ function renderDetailTable() {
                 <td class="strong">${esc(row.customer_name)}</td>
                 <td class="num">${fmt(row.volume, 3)}</td>
                 <td class="num">${fmt(row.unit_price)}</td>
-                <td class="num strong">${row.amount_error ? '<span class="badge badge-danger">公式错误</span>' : fmt(row.amount)}</td>
+                <td class="num strong">${
+                  row.amount_error
+                    ? '<span class="badge badge-danger">公式错误</span>'
+                    : fmt(row.amount)
+                }${row.amount_source === "manual" ? ' <span class="badge badge-warn">手动</span>' : ""}</td>
                 <td class="wrap muted">${esc(row.remark) || "—"}</td>
                 <td>
                   <div class="row-actions">

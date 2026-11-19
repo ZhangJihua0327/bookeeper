@@ -289,8 +289,39 @@ test("CSV 列出两张表的列，不含驾驶员列", async () => {
     headers: { Cookie: cookie },
   });
   const text = new TextDecoder("utf-8").decode(new Uint8Array(await response.arrayBuffer()));
-  assert.match(text, /表,日期,车型,客户名称,方量,单价,金额,备注/);
+  assert.match(text, /备注,计价方式/);
   assert.equal(text.includes("驾驶员"), false);
+});
+
+test("金额可手填；填了以手填为准，清空则回到公式", async () => {
+  const created = await request("/api/records", {
+    method: "POST",
+    body: {
+      scope: "pump",
+      entry_date: "2026-10-20",
+      truck_model: "一号",
+      customer_name: "贾建",
+      volume: 10,
+      amount_override: 999,
+    },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.json.data.amount, 999);
+  assert.equal(created.json.data.amount_source, "manual");
+
+  const auto = await request("/api/records", {
+    method: "POST",
+    body: { scope: "pump", entry_date: "2026-10-20", truck_model: "一号", customer_name: "贾建", volume: 10 },
+  });
+  assert.equal(auto.json.data.amount_source, "formula");
+  assert.equal(auto.json.data.amount, created.json.data.amount_formula_value);
+
+  const cleared = await request(`/api/records/${created.json.data.id}`, {
+    method: "PUT",
+    body: { scope: "pump", entry_date: "2026-10-20", truck_model: "一号", customer_name: "贾建", volume: 10 },
+  });
+  assert.equal(cleared.json.data.amount, auto.json.data.amount);
+  assert.equal(cleared.json.data.amount_source, "formula");
 });
 
 test("未填日期的存量记录不会让看板报错", async () => {

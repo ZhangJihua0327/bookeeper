@@ -434,11 +434,7 @@ export function decorate(record, formulas, priceIndex) {
   const values = toFormulaValues(scope, record);
   const usesPrice = String(formula.amount_formula).includes("单价");
 
-  const price =
-    record.unit_price_override !== null && record.unit_price_override !== undefined
-      ? { price: Number(record.unit_price_override), missing: false, source: "record" }
-      : priceIndex.resolve(scope, record.customer_name, record.truck_model);
-
+  const price = priceIndex.resolve(scope, record.customer_name, record.truck_model);
   values["单价"] = price.price;
 
   const result = computeAmount(
@@ -448,10 +444,18 @@ export function decorate(record, formulas, priceIndex) {
     formula.amount_decimals,
   );
 
+  // 手动金额优先；没填就用公式算出来的默认值
+  const manual =
+    record.amount_override !== null && record.amount_override !== undefined
+      ? Number(record.amount_override)
+      : null;
+
   return {
     ...record,
     scope_label: SCOPES[scope].label,
-    amount: result.amount,
+    amount: manual === null ? result.amount : round2(manual),
+    amount_formula_value: result.amount,
+    amount_source: manual === null ? "formula" : "manual",
     unit_price: price.price,
     price_missing: usesPrice ? price.missing : false,
     amount_error: result.error,
@@ -534,7 +538,7 @@ export function normalizeRecordInput(body, formulas) {
     truck_model: String(body.truck_model ?? "").trim().slice(0, 64),
     customer_name: String(body.customer_name ?? "").trim().slice(0, 128),
     remark: String(body.remark ?? "").trim().slice(0, 1000),
-    unit_price_override: null,
+    amount_override: null,
   };
 
   const errors = [];
@@ -542,10 +546,11 @@ export function normalizeRecordInput(body, formulas) {
     errors.push("日期格式应为 YYYY-MM-DD");
   }
 
-  if (body.unit_price_override !== undefined && body.unit_price_override !== null && body.unit_price_override !== "") {
-    const override = Number(body.unit_price_override);
-    if (!Number.isFinite(override) || override < 0) errors.push("单价必须是不小于 0 的数字");
-    else data.unit_price_override = override;
+  // 金额留空 → 用公式算；填了 → 以手填值为准
+  if (body.amount_override !== undefined && body.amount_override !== null && body.amount_override !== "") {
+    const override = Number(body.amount_override);
+    if (!Number.isFinite(override) || override < 0) errors.push("金额必须是不小于 0 的数字");
+    else data.amount_override = round2(override);
   }
 
   let volume = body.volume === "" || body.volume === null || body.volume === undefined ? NaN : Number(body.volume);
@@ -592,7 +597,7 @@ function readFilters(url) {
 }
 
 function buildCsv(rows) {
-  const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "备注"];
+  const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "备注", "计价方式"];
   const lines = [header.join(",")];
   for (const row of rows) {
     lines.push(
@@ -605,6 +610,7 @@ function buildCsv(rows) {
         row.unit_price,
         row.amount,
         row.remark,
+        row.amount_source === "manual" ? "手动" : "公式",
       ]
         .map(csvCell)
         .join(","),

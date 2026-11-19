@@ -151,7 +151,7 @@ export class MysqlStore {
     const { where, params } = buildRecordFilter(filter);
     const limit = Math.min(Math.max(Number(filter.limit) || 5000, 1), 20000);
     const rows = await this.query(
-      `SELECT id, scope, entry_date, truck_model, customer_name, volume, remark, unit_price_override
+      `SELECT id, scope, entry_date, truck_model, customer_name, volume, remark, amount_override
        FROM records ${where} ORDER BY entry_date IS NULL, entry_date DESC, id DESC LIMIT ?`,
       [...params, limit],
     );
@@ -160,7 +160,7 @@ export class MysqlStore {
 
   async getRecord(id) {
     const rows = await this.query(
-      `SELECT id, scope, entry_date, truck_model, customer_name, volume, remark, unit_price_override
+      `SELECT id, scope, entry_date, truck_model, customer_name, volume, remark, amount_override
        FROM records WHERE id = ?`,
       [id],
     );
@@ -169,7 +169,7 @@ export class MysqlStore {
 
   async createRecord(input) {
     const result = await this.execute(
-      `INSERT INTO records (scope, entry_date, truck_model, customer_name, volume, remark, unit_price_override)
+      `INSERT INTO records (scope, entry_date, truck_model, customer_name, volume, remark, amount_override)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         input.scope,
@@ -178,7 +178,7 @@ export class MysqlStore {
         input.customer_name,
         input.volume,
         input.remark || "",
-        input.unit_price_override ?? null,
+        input.amount_override ?? null,
       ],
     );
     return this.getRecord(result.insertId);
@@ -187,7 +187,7 @@ export class MysqlStore {
   async updateRecord(id, input) {
     await this.execute(
       `UPDATE records SET scope = ?, entry_date = ?, truck_model = ?, customer_name = ?, volume = ?,
-        remark = ?, unit_price_override = ? WHERE id = ?`,
+        remark = ?, amount_override = ? WHERE id = ?`,
       [
         input.scope,
         input.entry_date || null,
@@ -195,7 +195,7 @@ export class MysqlStore {
         input.customer_name,
         input.volume,
         input.remark || "",
-        input.unit_price_override ?? null,
+        input.amount_override ?? null,
         id,
       ],
     );
@@ -302,10 +302,10 @@ function normalizeRecord(row) {
     customer_name: row.customer_name || "",
     volume: Number(row.volume) || 0,
     remark: row.remark || "",
-    unit_price_override:
-      row.unit_price_override === null || row.unit_price_override === undefined
+    amount_override:
+      row.amount_override === null || row.amount_override === undefined
         ? null
-        : Number(row.unit_price_override),
+        : Number(row.amount_override),
   };
 }
 
