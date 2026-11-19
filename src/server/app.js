@@ -472,12 +472,27 @@ export function buildDashboard(rows, context) {
     amountErrors: 0,
   };
 
+  const byScope = {
+    pump: { count: 0, volume: 0, amount: 0 },
+    mixer: { count: 0, volume: 0, amount: 0 },
+  };
+
   for (const row of rows) {
-    kpi.volume += Number(row.volume) || 0;
-    kpi.amount += Number(row.amount) || 0;
+    const volume = Number(row.volume) || 0;
+    const amount = Number(row.amount) || 0;
+
+    kpi.volume += volume;
+    kpi.amount += amount;
     if (row.customer_name) kpi.customers.add(row.customer_name);
     if (row.price_missing) kpi.missingPrices += 1;
     if (row.amount_error) kpi.amountErrors += 1;
+
+    const bucket = byScope[row.scope];
+    if (bucket) {
+      bucket.count += 1;
+      bucket.volume += volume;
+      bucket.amount += amount;
+    }
   }
 
   return {
@@ -489,6 +504,20 @@ export function buildDashboard(rows, context) {
       avgPrice: kpi.volume > 0 ? round2(kpi.amount / kpi.volume) : 0,
       missingPrices: kpi.missingPrices,
       amountErrors: kpi.amountErrors,
+    },
+    scopes: {
+      pump: {
+        count: byScope.pump.count,
+        volume: round3(byScope.pump.volume),
+        amount: round2(byScope.pump.amount),
+        avgPrice: byScope.pump.volume > 0 ? round2(byScope.pump.amount / byScope.pump.volume) : 0,
+      },
+      mixer: {
+        count: byScope.mixer.count,
+        volume: round3(byScope.mixer.volume),
+        amount: round2(byScope.mixer.amount),
+        avgPrice: byScope.mixer.volume > 0 ? round2(byScope.mixer.amount / byScope.mixer.volume) : 0,
+      },
     },
     groups: {
       customer: groupRows(rows, (row) => row.customer_name || "未填写客户", "customer"),

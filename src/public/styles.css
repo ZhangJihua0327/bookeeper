@@ -490,15 +490,15 @@ textarea {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
 }
 
 .kpi {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 14px 15px;
+  padding: 12px 13px;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -513,7 +513,7 @@ textarea {
 }
 
 .kpi-value {
-  font-size: 22px;
+  font-size: clamp(17px, 1.7vw, 21px);
   font-weight: 650;
   letter-spacing: -0.3px;
   font-variant-numeric: tabular-nums;
@@ -911,9 +911,6 @@ table.table {
 /* ---------- 响应式 ---------- */
 
 @media (max-width: 1020px) {
-  .kpi-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
   .split {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -697,18 +697,18 @@ function renderBoardBody() {
   if (!data) return;
 
   const kpi = data.kpi;
+  const pump = data.scopes?.pump || { count: 0, volume: 0, amount: 0, avgPrice: 0 };
+  const mixer = data.scopes?.mixer || { count: 0, volume: 0, amount: 0, avgPrice: 0 };
+  const share = (value) => (kpi.volume > 0 ? `${((value / kpi.volume) * 100).toFixed(1)}%` : "0%");
+
   $("#kpi-grid").innerHTML = `
-    <div class="kpi is-accent"><span class="kpi-label">总方量</span><div class="kpi-value">${fmt(kpi.volume, 3)}<span class="unit">方</span></div><span class="kpi-sub">${kpi.count} 条记录</span></div>
-    <div class="kpi"><span class="kpi-label">总金额</span><div class="kpi-value">${fmt(kpi.amount)}<span class="unit">元</span></div><span class="kpi-sub">平均 ${fmt(kpi.avgPrice)} 元/方</span></div>
-    <div class="kpi"><span class="kpi-label">记录数</span><div class="kpi-value">${kpi.count}</div><span class="kpi-sub">泵车 + 搅拌车</span></div>
-    <div class="kpi"><span class="kpi-label">客户数</span><div class="kpi-value">${kpi.customers}</div><span class="kpi-sub">去重统计</span></div>
-    <div class="kpi"><span class="kpi-label">数据健康</span><div class="kpi-value">${
-      kpi.missingPrices + kpi.amountErrors === 0 ? "正常" : "待处理"
-    }</div><span class="kpi-sub">${
-      kpi.missingPrices + kpi.amountErrors === 0
-        ? "金额全部可计算"
-        : `缺单价 ${kpi.missingPrices} 条 / 公式错误 ${kpi.amountErrors} 条`
-    }</span></div>
+    <div class="kpi is-accent"><span class="kpi-label">总方量</span><div class="kpi-value">${fmt(kpi.volume, 3)}<span class="unit">方</span></div><span class="kpi-sub">泵车 ${fmt(pump.volume, 3)} · 搅拌车 ${fmt(mixer.volume, 3)}</span></div>
+    <div class="kpi is-accent"><span class="kpi-label">总金额</span><div class="kpi-value">${fmt(kpi.amount)}<span class="unit">元</span></div><span class="kpi-sub">共 ${kpi.count} 条记录</span></div>
+    <div class="kpi"><span class="kpi-label">泵车方量</span><div class="kpi-value">${fmt(pump.volume, 3)}<span class="unit">方</span></div><span class="kpi-sub">占总量 ${share(pump.volume)}</span></div>
+    <div class="kpi"><span class="kpi-label">泵车记录数</span><div class="kpi-value">${pump.count}<span class="unit">条</span></div><span class="kpi-sub">平均 ${fmt(pump.count ? pump.volume / pump.count : 0, 2)} 方/条</span></div>
+    <div class="kpi"><span class="kpi-label">泵车金额</span><div class="kpi-value">${fmt(pump.amount)}<span class="unit">元</span></div><span class="kpi-sub">平均 ${fmt(pump.avgPrice)} 元/方</span></div>
+    <div class="kpi"><span class="kpi-label">搅拌车方量</span><div class="kpi-value">${fmt(mixer.volume, 3)}<span class="unit">方</span></div><span class="kpi-sub">占总量 ${share(mixer.volume)}</span></div>
+    <div class="kpi"><span class="kpi-label">搅拌车金额</span><div class="kpi-value">${fmt(mixer.amount)}<span class="unit">元</span></div><span class="kpi-sub">平均 ${fmt(mixer.avgPrice)} 元/方</span></div>
   `;
 
   const notices = [];

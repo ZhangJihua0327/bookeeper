@@ -163,6 +163,12 @@ test("看板汇总：方量、金额、分组", async () => {
   assert.equal(data.kpi.customers, 2);
   assert.equal(data.groups.scope.length, 2);
   assert.equal(data.groups.customer.find((group) => group.key === "贾建").amount, 1050);
+
+  assert.equal(data.scopes.pump.count, 1);
+  assert.equal(data.scopes.pump.volume, 35);
+  assert.equal(data.scopes.pump.amount, 1050);
+  assert.equal(data.scopes.mixer.count, 1);
+  assert.equal(data.scopes.mixer.amount, 875);
 });
 
 test("按客户筛选", async () => {
