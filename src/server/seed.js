@@ -19,34 +19,11 @@ export function readSchema() {
 }
 
 /**
- * 老库升级：给已存在的 records 表补列 / 放宽约束。
- * 全部幂等，每次启动跑一遍也不会重复执行。
+ * 幂等建表 + 首次写入字典/公式/默认单价。
+ * 默认单价写 0，并在配置页提示，避免用编造的价格算出“看着像真的”金额。
  */
-async function runMigrations(store, log) {
-  if (!store.ensureColumn) return;
-
-  const applied = [];
-  if (await store.ensureColumn("records", "driver", "VARCHAR(255) NOT NULL DEFAULT '' AFTER remark")) {
-    applied.push("records.driver");
-  }
-  if (await store.ensureColumn("records", "source_key", "VARCHAR(64) NULL AFTER driver")) {
-    applied.push("records.source_key");
-  }
-  if (await store.ensureIndex("records", "uk_source_key", "UNIQUE KEY uk_source_key (source_key)")) {
-    applied.push("records.uk_source_key");
-  }
-  if (!(await store.isNullable("records", "entry_date"))) {
-    await store.execute("ALTER TABLE records MODIFY COLUMN entry_date DATE NULL");
-    applied.push("records.entry_date -> NULL");
-  }
-  if (applied.length) {
-    log.info?.(`[migrate] ${applied.join(", ")}`);
-  }
-}
-
 export async function migrateAndSeed(store, log = console) {
   await store.migrate(readSchema());
-  await runMigrations(store, log);
 
   const existingFormulas = await store.getFormulas();
   for (const [scope, formulas] of Object.entries(DEFAULT_FORMULAS)) {

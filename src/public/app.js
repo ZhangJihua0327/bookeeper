@@ -156,7 +156,7 @@ function currentScope() {
 }
 
 function datalistsHtml() {
-  return ["customer", "truck_model", "location", "driver"]
+  return ["customer", "truck_model", "location"]
     .map((kind) => {
       const options = (state.meta.dicts[kind] || [])
         .map((item) => `<option value="${esc(item.label)}"></option>`)
@@ -442,7 +442,7 @@ async function refreshRecent() {
         <table class="table">
           <thead><tr>
             <th>日期</th><th>客户名称</th><th>车型</th><th class="num">方量</th><th class="num">单价</th>
-            <th class="num">金额</th><th>施工地点</th><th>备注</th><th>驾驶员</th><th class="num">操作</th>
+            <th class="num">金额</th><th>施工地点</th><th>备注</th><th class="num">操作</th>
           </tr></thead>
           <tbody>
             ${data.rows
@@ -457,7 +457,6 @@ async function refreshRecent() {
                 <td class="num strong">${fmt(row.amount)}</td>
                 <td>${esc(row.location) || "—"}</td>
                 <td class="wrap muted">${esc(row.remark) || "—"}</td>
-                <td>${esc(row.driver) || "—"}</td>
                 <td>
                   <div class="row-actions">
                     <button class="btn btn-sm" type="button" data-edit="${row.id}">编辑</button>
@@ -789,7 +788,7 @@ function renderDetailTable() {
         <table class="table">
           <thead><tr>
             <th>日期</th><th>表</th><th>车型</th><th>客户名称</th><th class="num">方量</th>
-            <th class="num">单价</th><th class="num">金额</th><th>施工地点</th><th>备注</th><th>驾驶员</th><th class="num">操作</th>
+            <th class="num">单价</th><th class="num">金额</th><th>施工地点</th><th>备注</th><th class="num">操作</th>
           </tr></thead>
           <tbody>
             ${slice
@@ -805,7 +804,6 @@ function renderDetailTable() {
                 <td class="num strong">${row.amount_error ? '<span class="badge badge-danger">公式错误</span>' : fmt(row.amount)}</td>
                 <td>${esc(row.location) || "—"}</td>
                 <td class="wrap muted">${esc(row.remark) || "—"}</td>
-                <td>${esc(row.driver) || "—"}</td>
                 <td>
                   <div class="row-actions">
                     <button class="btn btn-sm" type="button" data-edit="${row.id}">编辑</button>

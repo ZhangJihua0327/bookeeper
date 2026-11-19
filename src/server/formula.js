@@ -413,7 +413,7 @@ const FUNCTIONS = {
   },
 };
 
-export const FORMULA_VARIABLES = ["日期", "车型", "客户名称", "方量", "施工地点", "备注", "驾驶员", "单价"];
+export const FORMULA_VARIABLES = ["日期", "车型", "客户名称", "方量", "施工地点", "备注", "单价"];
 
 export const FORMULA_FUNCTIONS = [
   { name: "单价()", syntax: "单价(客户名称, 车型)", description: "按配置的单价表取价，不填参数则用当前行的客户和车型" },

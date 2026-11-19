@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MySQL 数据访问层。所有方法都是异步的，接口保持窄而稳定，
  * 便于用内存实现（tests/memory-store.mjs）做无数据库测试。
  */
@@ -151,7 +151,7 @@ export class MysqlStore {
     const { where, params } = buildRecordFilter(filter);
     const limit = Math.min(Math.max(Number(filter.limit) || 5000, 1), 20000);
     const rows = await this.query(
-      `SELECT id, scope, entry_date, truck_model, customer_name, volume, location, remark, driver, source_key, unit_price_override
+      `SELECT id, scope, entry_date, truck_model, customer_name, volume, location, remark, unit_price_override
        FROM records ${where} ORDER BY entry_date IS NULL, entry_date DESC, id DESC LIMIT ?`,
       [...params, limit],
     );
@@ -160,7 +160,7 @@ export class MysqlStore {
 
   async getRecord(id) {
     const rows = await this.query(
-      `SELECT id, scope, entry_date, truck_model, customer_name, volume, location, remark, driver, source_key, unit_price_override
+      `SELECT id, scope, entry_date, truck_model, customer_name, volume, location, remark, unit_price_override
        FROM records WHERE id = ?`,
       [id],
     );
@@ -169,8 +169,8 @@ export class MysqlStore {
 
   async createRecord(input) {
     const result = await this.execute(
-      `INSERT INTO records (scope, entry_date, truck_model, customer_name, volume, location, remark, driver, unit_price_override)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO records (scope, entry_date, truck_model, customer_name, volume, location, remark, unit_price_override)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.scope,
         input.entry_date || null,
@@ -179,7 +179,6 @@ export class MysqlStore {
         input.volume,
         input.location || "",
         input.remark || "",
-        input.driver || "",
         input.unit_price_override ?? null,
       ],
     );
@@ -189,7 +188,7 @@ export class MysqlStore {
   async updateRecord(id, input) {
     await this.execute(
       `UPDATE records SET scope = ?, entry_date = ?, truck_model = ?, customer_name = ?, volume = ?,
-        location = ?, remark = ?, driver = ?, unit_price_override = ? WHERE id = ?`,
+        location = ?, remark = ?, unit_price_override = ? WHERE id = ?`,
       [
         input.scope,
         input.entry_date || null,
@@ -198,7 +197,6 @@ export class MysqlStore {
         input.volume,
         input.location || "",
         input.remark || "",
-        input.driver || "",
         input.unit_price_override ?? null,
         id,
       ],
@@ -209,40 +207,6 @@ export class MysqlStore {
   async deleteRecord(id) {
     const result = await this.execute("DELETE FROM records WHERE id = ?", [id]);
     return result.affectedRows > 0;
-  }
-
-  // ---------- 结构迁移（老库升级用，幂等） ----------
-
-  async hasColumn(table, column) {
-    const rows = await this.query(
-      "SELECT COUNT(*) AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
-      [table, column],
-    );
-    return Number(rows[0]?.c || 0) > 0;
-  }
-
-  async ensureColumn(table, column, definition) {
-    if (await this.hasColumn(table, column)) return false;
-    await this.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-    return true;
-  }
-
-  async isNullable(table, column) {
-    const rows = await this.query(
-      "SELECT IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
-      [table, column],
-    );
-    return rows[0]?.IS_NULLABLE === "YES";
-  }
-
-  async ensureIndex(table, indexName, definition) {
-    const rows = await this.query(
-      "SELECT COUNT(*) AS c FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
-      [table, indexName],
-    );
-    if (Number(rows[0]?.c || 0) > 0) return false;
-    await this.execute(`ALTER TABLE ${table} ADD ${definition}`);
-    return true;
   }
 
   invalidatePrices() {
@@ -345,8 +309,6 @@ function normalizeRecord(row) {
     volume: Number(row.volume) || 0,
     location: row.location || "",
     remark: row.remark || "",
-    driver: row.driver || "",
-    source_key: row.source_key || "",
     unit_price_override:
       row.unit_price_override === null || row.unit_price_override === undefined
         ? null

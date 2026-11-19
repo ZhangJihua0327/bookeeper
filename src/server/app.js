@@ -534,7 +534,6 @@ export function normalizeRecordInput(body, formulas) {
     customer_name: String(body.customer_name ?? "").trim().slice(0, 128),
     location: String(body.location ?? "").trim().slice(0, 255),
     remark: String(body.remark ?? "").trim().slice(0, 1000),
-    driver: String(body.driver ?? "").trim().slice(0, 255),
     unit_price_override: null,
   };
 
@@ -594,7 +593,7 @@ function readFilters(url) {
 }
 
 function buildCsv(rows) {
-  const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "施工地点", "备注", "驾驶员"];
+  const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "施工地点", "备注"];
   const lines = [header.join(",")];
   for (const row of rows) {
     lines.push(
@@ -608,7 +607,6 @@ function buildCsv(rows) {
         row.amount,
         row.location,
         row.remark,
-        row.driver,
       ]
         .map(csvCell)
         .join(","),

@@ -137,22 +137,6 @@ export class MemoryStore {
     return row ? { ...row } : null;
   }
 
-  async hasColumn() {
-    return true;
-  }
-
-  async ensureColumn() {
-    return false;
-  }
-
-  async isNullable() {
-    return true;
-  }
-
-  async ensureIndex() {
-    return false;
-  }
-
   async createRecord(input) {
     const row = {
       id: this.recordId++,
@@ -163,8 +147,6 @@ export class MemoryStore {
       volume: Number(input.volume),
       location: input.location || "",
       remark: input.remark || "",
-      driver: input.driver || "",
-      source_key: input.source_key || "",
       unit_price_override: input.unit_price_override ?? null,
     };
     this.records.push(row);
@@ -182,7 +164,6 @@ export class MemoryStore {
       volume: Number(input.volume),
       location: input.location || "",
       remark: input.remark || "",
-      driver: input.driver || "",
       unit_price_override: input.unit_price_override ?? null,
     });
     return { ...row };

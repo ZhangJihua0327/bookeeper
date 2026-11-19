@@ -10,8 +10,7 @@
   "scripts": {
     "start": "node src/server/index.js",
     "dev": "node --watch src/server/index.js",
-    "test": "node --test tests/*.test.mjs",
-    "db:import-feishu": "node scripts/import-feishu.mjs"
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "mysql2": "3.11.5"

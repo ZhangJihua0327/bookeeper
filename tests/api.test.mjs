@@ -282,26 +282,13 @@ test("阻断路径穿越", async () => {
   assert.ok([403, 404].includes(res.status));
 });
 
-test("驾驶员字段可写入，并出现在 CSV 里", async () => {
-  const created = await request("/api/records", {
-    method: "POST",
-    body: {
-      scope: "mixer",
-      entry_date: "2026-10-05",
-      customer_name: "汤建明",
-      remark: "9+8",
-      driver: "余兵、薛冒元",
-    },
-  });
-  assert.equal(created.status, 201);
-  assert.equal(created.json.data.driver, "余兵、薛冒元");
-
+test("CSV 列出两张表的列，不含驾驶员列", async () => {
   const response = await fetch(`${base}/api/export.csv?from=2026-10-01&to=2026-10-31`, {
     headers: { Cookie: cookie },
   });
   const text = new TextDecoder("utf-8").decode(new Uint8Array(await response.arrayBuffer()));
-  assert.match(text, /备注,驾驶员/);
-  assert.match(text, /余兵、薛冒元/);
+  assert.match(text, /表,日期,车型,客户名称,方量,单价,金额,施工地点,备注/);
+  assert.equal(text.includes("驾驶员"), false);
 });
 
 test("未填日期的存量记录不会让看板报错", async () => {
