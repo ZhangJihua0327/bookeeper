@@ -6,6 +6,13 @@ coverage/
 # 本地运行时配置（生产配置在服务器的 $HOME/.bookeeper_env）
 .env
 .env.local
+.env.*.local
+
+# 本地凭据速查：绝不提交
+SECRETS.local.md
+*.local.md
+secrets.md
+secrets/
 
 # 编辑器 / 本地工具
 .idea/
