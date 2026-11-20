@@ -3,13 +3,20 @@
  * 只负责“识别 + 归一化”，写库由前端确认后调 /api/records 完成。
  */
 
+import type { OcrEntry, OcrResult } from "../shared/types.js";
+import { isScope } from "./scopes.js";
 import { evaluateRemarkExpression } from "./formula.js";
 
 const ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 
 export const DEFAULT_OCR_MODEL = "qwen3-vl-plus";
 
-export function buildOcrPrompt({ customers = [], truckModels = [] } = {}) {
+interface OcrDicts {
+  customers?: string[];
+  truckModels?: string[];
+}
+
+export function buildOcrPrompt({ customers = [], truckModels = [] }: OcrDicts = {}) {
   const customerHint = customers.length ? `客户：${customers.join("、")}` : "客户：（暂无名单）";
   const modelHint = truckModels.length ? `车型：${truckModels.join("、")}` : "车型：（暂无名单）";
 
@@ -17,7 +24,7 @@ export function buildOcrPrompt({ customers = [], truckModels = [] } = {}) {
 
 台账的样子：
 - 顶部写日期，例如「11月18日」。
-- 上半部分：泵车作业，每行带编号 ①②③④，格式是「客户 施工地点 方量」，例如「亿德鑫 板坪 8方」。
+- 上半部分：泵车作业，每行带编号 ①②③ 不一定按照顺序，格式是「圈数字->汉字的几号泵 客户 施工地点 方量」，例如「一号 亿德鑫 板墙 8方」。
 - 下半部分：搅拌车运输，没有编号，格式是「客户 每车方量×车数 司机姓氏」，例如「朱水波 12×3 姜」。
 
 参考名单（只在字迹形近、拿不准时用来校正，不要强行套用；明显不匹配就当新客户）：
@@ -57,7 +64,7 @@ ${modelHint}
 }
 
 /** 模型偶尔会套 ```json 代码块或前后加话，这里做健壮提取。 */
-export function extractJson(text) {
+export function extractJson(text: unknown): unknown {
   let value = String(text ?? "").trim();
   value = value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
 
@@ -73,18 +80,20 @@ export function extractJson(text) {
   }
 }
 
-const SCOPES = new Set(["pump", "mixer"]);
-
 /** 把模型输出归一化成前端可直接渲染的草稿。 */
-export function normalizeOcrResult(raw, { today = "" } = {}) {
+export function normalizeOcrResult(raw: unknown, { today = "" } = {}): OcrResult {
   if (!raw || typeof raw !== "object") throw new Error("识别结果为空");
 
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(raw.date || "")) ? String(raw.date) : today;
+  const ledger = raw as { date?: unknown; entries?: unknown };
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(ledger.date || "")) ? String(ledger.date) : today;
 
-  const entries = [];
-  for (const item of Array.isArray(raw.entries) ? raw.entries : []) {
+  const entries: OcrEntry[] = [];
+  const rows: unknown[] = Array.isArray(ledger.entries) ? ledger.entries : [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as Partial<Record<keyof OcrEntry, unknown>>;
     const table = String(item?.table || "").toLowerCase();
-    if (!SCOPES.has(table)) continue;
+    if (!isScope(table)) continue;
 
     const customer = String(item?.customer ?? "").trim().slice(0, 128);
     const volume = Number(item?.volume);
@@ -92,7 +101,7 @@ export function normalizeOcrResult(raw, { today = "" } = {}) {
 
     const note = String(item?.note ?? "").trim().slice(0, 255);
     const volumeValue = Number.isFinite(volume) ? Math.round(volume * 1000) / 1000 : 0;
-    const uncertain = Array.isArray(item?.uncertain) ? item.uncertain.map((value) => String(value)).slice(0, 6) : [];
+    const uncertain = Array.isArray(item?.uncertain) ? item.uncertain.map((value: unknown) => String(value)).slice(0, 6) : [];
     const rawConfidence = Number(item?.confidence);
     let confidence = Number.isFinite(rawConfidence) ? Math.min(Math.max(rawConfidence, 0), 1) : null;
 
@@ -124,7 +133,7 @@ export function normalizeOcrResult(raw, { today = "" } = {}) {
  * 从搅拌车备注里抠出算式求和（去掉中文司机名），用于反算校验。
  * 例如「12×3 姜」→ 36；「8+3 子姜」→ 11；无法解析时返回 null。
  */
-export function arithmeticFromNote(note) {
+export function arithmeticFromNote(note: unknown) {
   const cleaned = String(note ?? "")
     .replace(/[\u4e00-\u9fa5]+/g, " ")
     .replace(/[，,；;、]/g, "+")
@@ -135,15 +144,15 @@ export function arithmeticFromNote(note) {
   return result.error ? null : result.value;
 }
 
-const round3 = (value) => Math.round(value * 1000) / 1000;
+const round3 = (value: number) => Math.round(value * 1000) / 1000;
 
 /**
  * 搅拌车按「同一客户当天一条」合并：方量相加，司机明细用换行连接。
  * 与历史台账的写法保持一致（一条记录里多行司机明细）。
  */
-export function mergeMixerEntries(entries) {
-  const merged = [];
-  const indexByCustomer = new Map();
+export function mergeMixerEntries(entries: OcrEntry[]) {
+  const merged: OcrEntry[] = [];
+  const indexByCustomer = new Map<string, number>();
 
   for (const entry of entries) {
     if (entry.table !== "mixer" || !entry.customer) {
@@ -172,10 +181,17 @@ export function mergeMixerEntries(entries) {
   return merged;
 }
 
-/**
- * 调用视觉模型识别一张图。
- * @param {{apiKey: string, model?: string, imageDataUrl: string, dicts?: object, today?: string, timeoutMs?: number, fetchImpl?: Function}} options
- */
+interface RecognitionOptions {
+  apiKey: string;
+  model?: string;
+  imageDataUrl: string;
+  dicts?: OcrDicts;
+  today?: string;
+  timeoutMs?: number;
+  fetchImpl?: (url: string, init: RequestInit) => Promise<Pick<Response, "ok" | "status" | "text">>;
+}
+
+/** 调用视觉模型识别一张图。 */
 export async function recognizeLedger({
   apiKey,
   model = DEFAULT_OCR_MODEL,
@@ -184,7 +200,7 @@ export async function recognizeLedger({
   today = "",
   timeoutMs = 120000,
   fetchImpl = fetch,
-}) {
+}: RecognitionOptions) {
   if (!apiKey) throw new Error("未配置 DASHSCOPE_API_KEY");
 
   const payload = {
@@ -214,7 +230,7 @@ export async function recognizeLedger({
     throw new Error(`识别服务返回 ${response.status}：${text.slice(0, 200)}`);
   }
 
-  let body;
+  let body: { choices?: { message?: { content?: unknown } }[] } | null;
   try {
     body = JSON.parse(text);
   } catch {
@@ -223,7 +239,7 @@ export async function recognizeLedger({
 
   const message = body?.choices?.[0]?.message?.content;
   const content = Array.isArray(message)
-    ? message.map((part) => part?.text || "").join("")
+    ? message.map((part: { text?: unknown } | null) => part?.text || "").join("")
     : String(message || "");
 
   if (!content) throw new Error("识别服务没有返回内容");

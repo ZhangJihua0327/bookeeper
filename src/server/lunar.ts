@@ -6,6 +6,8 @@
  * 结果按农历年缓存，进程内只算一次。
  */
 
+import type { LunarYear } from "../shared/types.js";
+
 const FMT = new Intl.DateTimeFormat("en-u-ca-chinese", {
   timeZone: "Asia/Shanghai",
   year: "numeric",
@@ -17,20 +19,20 @@ const STEMS = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "�
 const BRANCHES = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"];
 const ZODIAC = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
 
-const startCache = new Map();
+const startCache = new Map<number, string | null>();
 
-export function isDateString(value) {
+export function isDateString(value: unknown) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
-function lunarParts(dateString) {
+function lunarParts(dateString: string) {
   let parts;
   try {
     parts = FMT.formatToParts(new Date(`${dateString}T12:00:00+08:00`));
   } catch {
     return null;
   }
-  const read = (type) => parts.find((part) => part.type === type)?.value || "";
+  const read = (type: string) => parts.find((part) => part.type === type)?.value || "";
   const year = Number(read("relatedYear"));
   const month = Number(read("month"));
   const day = Number(read("day"));
@@ -38,20 +40,22 @@ function lunarParts(dateString) {
   return { year, month, day };
 }
 
-function addDays(dateString, days) {
+function addDays(dateString: string, days: number) {
   const date = new Date(`${dateString}T12:00:00+08:00`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 
 /** 返回该日期所在农历年的正月初一（YYYY-MM-DD）；无法判断时返回 null。 */
-export function lunarYearStart(dateString) {
+export function lunarYearStart(dateString: unknown) {
   if (!isDateString(dateString)) return null;
-  const today = lunarParts(dateString);
+  const date = String(dateString);
+  const today = lunarParts(date);
   if (!today) return null;
 
   const year = today.year;
-  if (startCache.has(year)) return startCache.get(year);
+  const cached = startCache.get(year);
+  if (cached !== undefined) return cached;
 
   let cursor = `${year}-01-01`;
   let found = null;
@@ -69,9 +73,10 @@ export function lunarYearStart(dateString) {
 }
 
 /** 农历年信息：{ year, start, ganzhi, zodiac, label } */
-export function lunarYearInfo(dateString) {
+export function lunarYearInfo(dateString: unknown): LunarYear | null {
   if (!isDateString(dateString)) return null;
-  const today = lunarParts(dateString);
+  const date = String(dateString);
+  const today = lunarParts(date);
   const start = lunarYearStart(dateString);
   if (!today || !start) return null;
 

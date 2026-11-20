@@ -1,8 +1,62 @@
-/* Bookeeper 前端：原生 ESM，无构建步骤、无第三方依赖 */
+/* Bookeeper 前端：原生 DOM，无第三方运行时依赖。 */
 
-const TABS = ["board", "entry", "config"];
+import type {
+  DashboardData, DecoratedRecord, DictKind, DictOption, EvaluationData, GroupBy, GroupTotals, MetaData,
+  OcrResult, RecordFilters, RecordInput, RecordsData, Scope, ScopeDefinition, SessionData,
+} from "../shared/types.js";
 
-const state = {
+const TABS = ["board", "entry", "config"] as const;
+type Tab = (typeof TABS)[number];
+const BOARD_GROUPS: [GroupBy, string][] = [
+  ["customer", "按客户"],
+  ["model", "按车型"],
+  ["date", "按日期"],
+  ["scope", "按表"],
+];
+
+type ChartMetric = "volume" | "amount";
+type Filters = Required<Omit<RecordFilters, "limit">> & { quick: string };
+type PreviewSample = { customer: string; model: string; date: string };
+
+interface EntryRow {
+  uid: string;
+  id: number | null;
+  scope: Scope;
+  customer_name: string;
+  truck_model: string;
+  volume: string;
+  remark: string;
+  amount_override: string;
+  auto: number | null;
+  autoError: string;
+  autoVolume: number | null;
+  confidence: number | null;
+  uncertain: string[];
+  raw: string;
+  fromOcr: boolean;
+}
+
+interface AppState {
+  meta: MetaData | null;
+  tab: Tab;
+  filters: Filters;
+  dashboard: DashboardData | null;
+  boardInitialized: boolean;
+  page: number;
+  groupBy: GroupBy;
+  chartMetric: ChartMetric;
+  recent: DecoratedRecord[];
+  entry: {
+    date: string;
+    scope: Scope;
+    editingId: number | null;
+    rows: EntryRow[];
+    photo: { dataUrl: string; status: string; busy: boolean };
+  };
+  preview: Partial<Record<Scope, PreviewSample>>;
+}
+
+const state: AppState = {
   meta: null,
   tab: "board",
   filters: { scope: "all", from: "", to: "", customer: "", model: "", q: "", quick: "month" },
@@ -22,43 +76,66 @@ const state = {
   preview: {},
 };
 
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const $ = <T extends HTMLElement = HTMLElement>(selector: string, root: ParentNode = document) =>
+  root.querySelector<T>(selector);
+const $$ = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)];
 
-function esc(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (ch) => {
-    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
-  });
+function requiredElement<T extends HTMLElement = HTMLElement>(selector: string, root: ParentNode = document): T {
+  const element = $<T>(selector, root);
+  if (!element) throw new Error(`页面缺少元素：${selector}`);
+  return element;
 }
 
-function fmt(value, digits = 2) {
+function closest<T extends HTMLElement = HTMLElement>(target: EventTarget | null, selector: string) {
+  return target instanceof Element ? target.closest<T>(selector) : null;
+}
+
+function isScope(value: string | undefined): value is Scope {
+  return value === "pump" || value === "mixer";
+}
+
+function isDictKind(value: string | undefined): value is DictKind {
+  return value === "customer" || value === "truck_model";
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error ?? "");
+}
+
+function esc(value: unknown) {
+  const entities: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => entities[ch]);
+}
+
+function fmt(value: unknown, digits = 2) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "0";
   return number.toLocaleString("zh-CN", { minimumFractionDigits: 0, maximumFractionDigits: digits });
 }
 
-function ymd(date) {
+function ymd(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
-function shiftDate(dateString, days) {
+function shiftDate(dateString: string, days: number) {
   const date = new Date(`${dateString}T12:00:00`);
   date.setDate(date.getDate() + days);
   return ymd(date);
 }
 
-async function api(path, { method = "GET", body } = {}) {
-  const init = { method, credentials: "same-origin", headers: {}, cache: "no-store" };
+async function api<T = unknown>(path: string, { method = "GET", body }: { method?: string; body?: unknown } = {}) {
+  const headers = new Headers();
+  const init: RequestInit = { method, credentials: "same-origin", headers, cache: "no-store" };
   if (body !== undefined) {
-    init.headers["Content-Type"] = "application/json";
+    headers.set("Content-Type", "application/json");
     init.body = JSON.stringify(body);
   }
 
   const response = await fetch(path, init);
-  let payload = {};
+  let payload: { data?: T; ok?: boolean; error?: string } = {};
   try {
     payload = await response.json();
   } catch {
@@ -72,59 +149,59 @@ async function api(path, { method = "GET", body } = {}) {
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.error || `请求失败（${response.status}）`);
   }
-  return payload.data;
+  return payload.data as T;
 }
 
-let toastTimer = null;
-function toast(message, isError = false) {
-  const node = $("#toast");
+let toastTimer: number | undefined;
+function toast(message: string, isError = false) {
+  const node = requiredElement("#toast");
   node.textContent = message;
   node.classList.toggle("is-error", Boolean(isError));
   node.classList.add("is-visible");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.remove("is-visible"), 2600);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => node.classList.remove("is-visible"), 2600);
 }
 
-function scopeDef(key) {
+function scopeDef(key: Scope) {
   return state.meta?.scopes.find((scope) => scope.key === key) || state.meta?.scopes[0] || { key, label: key, fields: [] };
 }
 
 /* ---------------------------------------------------------------- 登录 */
 
 function showLogin() {
-  $("#app").classList.add("hidden");
-  $("#login").classList.remove("hidden");
+  requiredElement("#app").classList.add("hidden");
+  requiredElement("#login").classList.remove("hidden");
   $("#login-password")?.focus();
 }
 
 function showApp() {
-  $("#login").classList.add("hidden");
-  $("#app").classList.remove("hidden");
+  requiredElement("#login").classList.add("hidden");
+  requiredElement("#app").classList.remove("hidden");
 }
 
-$("#login-form").addEventListener("submit", async (event) => {
+requiredElement("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const password = $("#login-password").value;
+  const password = requiredElement<HTMLInputElement>("#login-password").value;
   try {
     await api("/api/login", { method: "POST", body: { password } });
-    $("#login-error").textContent = "";
-    $("#login-password").value = "";
+    requiredElement("#login-error").textContent = "";
+    requiredElement<HTMLInputElement>("#login-password").value = "";
     await afterLogin();
   } catch (error) {
-    $("#login-error").textContent = error.message;
+    requiredElement("#login-error").textContent = errorMessage(error);
   }
 });
 
-$("#logout-btn").addEventListener("click", async () => {
+requiredElement("#logout-btn").addEventListener("click", async () => {
   await api("/api/logout", { method: "POST", body: {} }).catch(() => {});
   state.meta = null;
   showLogin();
 });
 
 async function boot() {
-  let session = null;
+  let session: SessionData | null = null;
   try {
-    session = await api("/api/session");
+    session = await api<SessionData>("/api/session");
   } catch {
     session = null;
   }
@@ -137,10 +214,10 @@ async function boot() {
 }
 
 async function afterLogin() {
-  state.meta = await api("/api/meta");
+  state.meta = await api<MetaData>("/api/meta");
   state.entry.date = state.meta.today;
   showApp();
-  $("#today-label").textContent = state.meta.today;
+  requiredElement("#today-label").textContent = state.meta.today;
   switchTab(tabFromHash());
 }
 
@@ -148,7 +225,7 @@ async function afterLogin() {
 
 function tabFromHash() {
   const key = location.hash.replace(/^#/, "");
-  return TABS.includes(key) ? key : "board";
+  return TABS.find((tab) => tab === key) ?? "board";
 }
 
 window.addEventListener("hashchange", () => {
@@ -156,13 +233,13 @@ window.addEventListener("hashchange", () => {
   if (tab !== state.tab) switchTab(tab, { syncHash: false });
 });
 
-$("#tabs").addEventListener("click", (event) => {
-  const tab = event.target.closest(".tab")?.dataset.tab;
+requiredElement("#tabs").addEventListener("click", (event) => {
+  const tab = closest(event.target, ".tab")?.dataset.tab;
   if (tab) switchTab(tab);
 });
 
-function switchTab(tab, { syncHash = true } = {}) {
-  if (!TABS.includes(tab)) tab = "board";
+function switchTab(key: string, { syncHash = true } = {}) {
+  const tab = TABS.find((item) => item === key) ?? "board";
   state.tab = tab;
 
   $$(".tab").forEach((node) => node.classList.toggle("is-active", node.dataset.tab === tab));
@@ -180,7 +257,7 @@ function switchTab(tab, { syncHash = true } = {}) {
 
 let rowSeq = 0;
 
-function makeRow(patch = {}) {
+function makeRow(patch: Partial<EntryRow> = {}): EntryRow {
   return {
     uid: `r${++rowSeq}`,
     id: null,
@@ -201,17 +278,19 @@ function makeRow(patch = {}) {
   };
 }
 
-function rowIsEmpty(row) {
+function rowIsEmpty(row: EntryRow) {
   return !row.id && !row.customer_name.trim() && String(row.volume).trim() === "" && !row.remark.trim();
 }
 
 function renderEntry() {
+  const meta = state.meta;
+  if (!meta) return;
   if (!state.entry.rows.length) state.entry.rows = [makeRow()];
 
   const editing = state.entry.editingId;
   const scope = scopeDef(state.entry.scope);
 
-  $("#view-entry").innerHTML = `
+  requiredElement("#view-entry").innerHTML = `
     <div class="stack">
       <div class="card">
         <div class="card-head">
@@ -226,7 +305,7 @@ function renderEntry() {
           <div class="spacer"></div>
           <div class="entry-tools">
             <div class="segmented" id="scope-switch">
-              ${state.meta.scopes
+              ${meta.scopes
                 .map(
                   (item) =>
                     `<button type="button" data-scope="${item.key}" class="${
@@ -237,12 +316,12 @@ function renderEntry() {
             </div>
             <label class="date-pill">
               <span>日期</span>
-              <input type="date" id="entry-date" value="${esc(state.entry.date || state.meta.today)}" />
+              <input type="date" id="entry-date" value="${esc(state.entry.date || meta.today)}" />
             </label>
           </div>
         </div>
 
-        ${photoStripHtml()}
+        ${photoStripHtml(meta.ocr)}
 
         <div id="rows-wrap"></div>
 
@@ -275,9 +354,8 @@ function renderEntry() {
   refreshRecent();
 }
 
-function photoStripHtml() {
+function photoStripHtml(ocr: MetaData["ocr"]) {
   const photo = state.entry.photo;
-  const ocr = state.meta.ocr || {};
 
   return `
     <div class="photo-strip ${photo.dataUrl ? "has-image" : ""}" id="photo-strip" ${photo.busy ? 'aria-busy="true"' : ""}>
@@ -318,7 +396,7 @@ function photoStripHtml() {
   `;
 }
 
-function rowHtml(row) {
+function rowHtml(row: EntryRow, scopes: ScopeDefinition[]) {
   const scope = scopeDef(row.scope);
   const modelRequired = scope.fields.find((field) => field.key === "truck_model")?.required;
   const flag =
@@ -332,7 +410,7 @@ function rowHtml(row) {
     <tr data-row="${row.uid}" class="${row.id ? "is-editing" : ""}">
       <td data-label="表">
         <select class="scope-select" data-uid="${row.uid}" data-field="scope">
-          ${state.meta.scopes
+          ${scopes
             .map(
               (item) =>
                 `<option value="${item.key}"${item.key === row.scope ? " selected" : ""}>${esc(item.label)}</option>`,
@@ -377,7 +455,8 @@ function rowHtml(row) {
 
 function renderRows() {
   const wrap = $("#rows-wrap");
-  if (!wrap) return;
+  const scopes = state.meta?.scopes;
+  if (!wrap || !scopes) return;
 
   wrap.innerHTML = `
     <div class="table-wrap entry-table-wrap stack-wrap">
@@ -402,7 +481,7 @@ function renderRows() {
             <th></th>
           </tr>
         </thead>
-        <tbody>${state.entry.rows.map((row) => rowHtml(row)).join("")}</tbody>
+        <tbody>${state.entry.rows.map((row) => rowHtml(row, scopes)).join("")}</tbody>
       </table>
     </div>
   `;
@@ -411,7 +490,7 @@ function renderRows() {
   updateTotals();
 }
 
-function findRow(uid) {
+function findRow(uid: string | undefined) {
   return state.entry.rows.find((row) => row.uid === uid);
 }
 
@@ -452,21 +531,23 @@ function updateTotals() {
       : "";
   }
 
-  const button = $("#save-rows");
+  const button = $<HTMLButtonElement>("#save-rows");
   if (button && !button.disabled) {
     button.textContent = state.entry.editingId ? "保存修改" : rows.length > 1 ? `保存 ${rows.length} 条` : "保存";
   }
 }
 
-let amountTimer = null;
+let amountTimer: number | undefined;
 let amountToken = 0;
 
 function scheduleAmounts(delay = 320) {
-  clearTimeout(amountTimer);
-  amountTimer = setTimeout(() => void computeAmounts(), delay);
+  window.clearTimeout(amountTimer);
+  amountTimer = window.setTimeout(() => void computeAmounts(), delay);
 }
 
 async function computeAmounts() {
+  const meta = state.meta;
+  if (!meta) return;
   const token = ++amountToken;
 
   for (const row of state.entry.rows) {
@@ -477,9 +558,9 @@ async function computeAmounts() {
       continue;
     }
 
-    const formula = state.meta.formulas[row.scope] || {};
+    const formula = meta.formulas[row.scope];
     const values = {
-      entry_date: state.entry.date || state.meta.today,
+      entry_date: state.entry.date || meta.today,
       customer_name: row.customer_name,
       truck_model: row.truck_model,
       remark: row.remark,
@@ -490,7 +571,7 @@ async function computeAmounts() {
       if (!Number.isFinite(volume)) volume = null;
 
       if (volume === null) {
-        const derived = await api("/api/evaluate", {
+        const derived = await api<EvaluationData>("/api/evaluate", {
           method: "POST",
           body: { scope: row.scope, expression: formula.volume_formula, ...values },
         });
@@ -498,7 +579,7 @@ async function computeAmounts() {
         volume = derived.ok && Number(derived.value) > 0 ? Number(derived.value) : null;
       }
 
-      const result = await api("/api/evaluate", {
+      const result = await api<EvaluationData>("/api/evaluate", {
         method: "POST",
         body: { scope: row.scope, expression: formula.amount_formula, ...values, volume: volume ?? 0 },
       });
@@ -510,7 +591,7 @@ async function computeAmounts() {
     } catch (error) {
       if (token !== amountToken) return;
       row.auto = null;
-      row.autoError = error.message;
+      row.autoError = errorMessage(error);
     }
   }
 
@@ -519,18 +600,20 @@ async function computeAmounts() {
   updateTotals();
 }
 
-async function rememberDicts(row) {
+async function rememberDicts(row: EntryRow) {
+  const meta = state.meta;
+  if (!meta) return;
   const scope = scopeDef(row.scope);
   for (const field of scope.fields) {
     if (field.type !== "dict") continue;
     const value = String(row[field.key] || "").trim();
     if (!value) continue;
-    const list = state.meta.dicts[field.dict] || [];
+    const list = meta.dicts[field.dict] || [];
     if (list.some((item) => item.label === value)) continue;
     try {
-      const item = await api("/api/dicts", { method: "POST", body: { kind: field.dict, scope: scope.key, label: value } });
+      const item = await api<DictOption>("/api/dicts", { method: "POST", body: { kind: field.dict, scope: scope.key, label: value } });
       list.push(item);
-      state.meta.dicts[field.dict] = list;
+      meta.dicts[field.dict] = list;
     } catch {
       /* 自动补字典失败不影响主流程 */
     }
@@ -538,21 +621,24 @@ async function rememberDicts(row) {
 }
 
 async function saveRows() {
+  const meta = state.meta;
+  if (!meta) return;
   const rows = state.entry.rows.filter((row) => !rowIsEmpty(row));
   if (!rows.length) {
     toast("先填一行再保存", true);
     return;
   }
 
-  const button = $("#save-rows");
+  const button = $<HTMLButtonElement>("#save-rows");
   if (button) button.disabled = true;
 
-  const date = state.entry.date || state.meta.today;
+  const date = state.entry.date || meta.today;
   let saved = 0;
-  const failed = [];
+  const failed: { row: EntryRow; error: string }[] = [];
 
   for (const row of rows) {
-    const payload = {
+    const payload: Omit<RecordInput, "volume" | "amount_override"> &
+      Partial<Pick<RecordInput, "volume" | "amount_override">> = {
       scope: row.scope,
       entry_date: date,
       customer_name: row.customer_name.trim(),
@@ -568,7 +654,7 @@ async function saveRows() {
       saved += 1;
       await rememberDicts(row);
     } catch (error) {
-      failed.push({ row, error: error.message });
+      failed.push({ row, error: errorMessage(error) });
     }
   }
 
@@ -593,9 +679,11 @@ async function saveRows() {
   renderEntry();
 }
 
-function loadRecordIntoEntry(record) {
+function loadRecordIntoEntry(record: DecoratedRecord) {
+  const meta = state.meta;
+  if (!meta) return;
   state.entry.scope = record.scope;
-  state.entry.date = record.entry_date || state.meta.today;
+  state.entry.date = record.entry_date || meta.today;
   state.entry.editingId = record.id;
   state.entry.rows = [
     makeRow({
@@ -627,7 +715,7 @@ async function refreshRecent() {
   if (!wrap) return;
 
   try {
-    const data = await api(`/api/records?scope=${encodeURIComponent(state.entry.scope)}&limit=10`);
+    const data = await api<RecordsData>(`/api/records?scope=${encodeURIComponent(state.entry.scope)}&limit=10`);
     state.recent = data.rows;
     if (!data.rows.length) {
       wrap.innerHTML = `<div class="empty">还没有记录，先在上方填一条吧</div>`;
@@ -687,18 +775,18 @@ async function refreshRecent() {
       </div>
     `;
   } catch (error) {
-    wrap.innerHTML = `<div class="empty">加载失败：${esc(error.message)}</div>`;
+    wrap.innerHTML = `<div class="empty">加载失败：${esc(errorMessage(error))}</div>`;
   }
 }
 
-async function deleteRecord(id, after) {
+async function deleteRecord(id: number, after: () => Promise<void>) {
   if (!window.confirm(`确定删除记录 #${id}？删除后不可恢复。`)) return;
   try {
     await api(`/api/records/${id}`, { method: "DELETE" });
     toast("已删除");
     await after();
   } catch (error) {
-    toast(error.message, true);
+    toast(errorMessage(error), true);
   }
 }
 
@@ -711,14 +799,15 @@ async function deleteRecord(id, after) {
  * - 清空内容回到全部；也可以不选，直接打新的名字。
  */
 
-let suggestNode = null;
-let suggestInput = null;
-let suggestItems = [];
+let suggestNode: HTMLDivElement | null = null;
+let suggestInput: HTMLInputElement | null = null;
+let suggestItems: string[] = [];
 let suggestIndex = -1;
 let suggestQuery = "";
 let suggestApplying = false;
 
-function suggestOptions(kind) {
+function suggestOptions(kind: string | undefined) {
+  if (!isDictKind(kind)) return [];
   return (state.meta?.dicts?.[kind] || []).map((item) => item.label);
 }
 
@@ -730,7 +819,7 @@ function ensureSuggestNode() {
   // mousedown 先兜住，点候选时输入框不会失焦
   suggestNode.addEventListener("mousedown", (event) => event.preventDefault());
   suggestNode.addEventListener("click", (event) => {
-    const item = event.target.closest(".suggest-item");
+    const item = closest(event.target, ".suggest-item");
     if (item) applySuggest(item.dataset.value);
   });
   document.body.appendChild(suggestNode);
@@ -794,7 +883,7 @@ function renderSuggest(query = suggestQuery) {
   node.querySelector(".suggest-item.is-active")?.scrollIntoView({ block: "nearest" });
 }
 
-function openSuggest(input) {
+function openSuggest(input: HTMLInputElement) {
   if (!input?.dataset?.dict || !state.meta) return;
   suggestInput = input;
   suggestIndex = -1;
@@ -809,15 +898,15 @@ function closeSuggest() {
   suggestQuery = "";
 }
 
-function moveSuggest(step) {
+function moveSuggest(step: number) {
   if (!suggestItems.length) return;
   suggestIndex = (suggestIndex + step + suggestItems.length) % suggestItems.length;
   renderSuggest(suggestQuery);
 }
 
-function applySuggest(value) {
+function applySuggest(value: string | undefined) {
   const input = suggestInput;
-  if (!input) return;
+  if (!input || value === undefined) return;
 
   suggestApplying = true;
   input.value = value;
@@ -831,19 +920,19 @@ function applySuggest(value) {
 }
 
 document.addEventListener("focusin", (event) => {
-  const input = event.target.closest?.("input[data-dict]");
+  const input = closest<HTMLInputElement>(event.target, "input[data-dict]");
   if (input) openSuggest(input);
 });
 
 document.addEventListener("focusout", (event) => {
-  if (!event.target.closest?.("input[data-dict]")) return;
+  if (!closest<HTMLInputElement>(event.target, "input[data-dict]")) return;
   setTimeout(() => {
     if (document.activeElement !== suggestInput) closeSuggest();
   }, 120);
 });
 
 document.addEventListener("input", (event) => {
-  const input = event.target.closest?.("input[data-dict]");
+  const input = closest<HTMLInputElement>(event.target, "input[data-dict]");
   if (!input || suggestApplying) return;
   if (input !== suggestInput) suggestInput = input;
   suggestIndex = -1;
@@ -851,7 +940,7 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  const input = event.target.closest?.("input[data-dict]");
+  const input = closest<HTMLInputElement>(event.target, "input[data-dict]");
   if (!input || input !== suggestInput) return;
 
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -870,7 +959,7 @@ document.addEventListener("keydown", (event) => {
 
 document.addEventListener("pointerdown", (event) => {
   if (!suggestNode || suggestNode.classList.contains("hidden")) return;
-  if (event.target.closest?.(".suggest") || event.target.closest?.("input[data-dict]")) return;
+  if (closest(event.target, ".suggest") || closest<HTMLInputElement>(event.target, "input[data-dict]")) return;
   closeSuggest();
 });
 
@@ -879,7 +968,7 @@ window.addEventListener("scroll", closeSuggest, true);
 
 /* ---------------------------------------------------------------- 拍照识别 */
 
-async function loadPhotoFile(file) {
+async function loadPhotoFile(file: File) {
   if (!String(file?.type || "").startsWith("image/")) {
     toast("请上传图片文件", true);
     return;
@@ -898,19 +987,19 @@ async function loadPhotoFile(file) {
     if (!state.entry.rows.length) state.entry.rows = [makeRow()];
     renderEntry();
   } catch (error) {
-    toast(error.message || "图片处理失败", true);
+    toast(errorMessage(error) || "图片处理失败", true);
   }
 }
 
-async function compressImage(file, maxSide = 2600, quality = 0.88) {
-  const dataUrl = await new Promise((resolve, reject) => {
+async function compressImage(file: File, maxSide = 2600, quality = 0.88) {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(new Error("读取图片失败"));
     reader.readAsDataURL(file);
   });
 
-  const image = await new Promise((resolve, reject) => {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const element = new window.Image();
     element.onload = () => resolve(element);
     element.onerror = () => reject(new Error("无法解析这张图片"));
@@ -923,12 +1012,14 @@ async function compressImage(file, maxSide = 2600, quality = 0.88) {
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(image.width * scale));
   canvas.height = Math.max(1, Math.round(image.height * scale));
-  canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("无法压缩这张图片");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", quality);
 }
 
 /** 粘贴（Ctrl+V）和拖拽都走这里 */
-function imageFromClipboard(data) {
+function imageFromClipboard(data: DataTransfer | null) {
   if (!data) return null;
   for (const item of data.items || []) {
     if (item.kind === "file" && String(item.type).startsWith("image/")) {
@@ -955,7 +1046,7 @@ async function runOcr() {
   renderEntry();
 
   try {
-    const result = await api("/api/ocr", { method: "POST", body: { image: photo.dataUrl } });
+    const result = await api<OcrResult>("/api/ocr", { method: "POST", body: { image: photo.dataUrl } });
     const drafts = result.entries || [];
     if (result.date) state.entry.date = result.date;
 
@@ -982,16 +1073,16 @@ async function runOcr() {
     state.entry.photo.busy = false;
     state.entry.photo.status = "";
     renderEntry();
-    toast(error.message, true);
+    toast(errorMessage(error), true);
   }
 }
 
 /* ---------------------------------------------------------------- 录入页事件 */
 
-const viewEntry = $("#view-entry");
+const viewEntry = requiredElement("#view-entry");
 
 viewEntry.addEventListener("click", async (event) => {
-  const photoAction = event.target.closest("[data-photo-action]")?.dataset.photoAction;
+  const photoAction = closest(event.target, "[data-photo-action]")?.dataset.photoAction;
   if (photoAction === "pick") return $("#photo-file")?.click();
   if (photoAction === "run") return runOcr();
   if (photoAction === "clear") {
@@ -999,40 +1090,41 @@ viewEntry.addEventListener("click", async (event) => {
     return renderEntry();
   }
 
-  if (event.target.closest("#photo-strip") && !state.entry.photo.dataUrl) {
+  if (closest(event.target, "#photo-strip") && !state.entry.photo.dataUrl) {
     $("#photo-file")?.click();
     return;
   }
 
-  const scopeButton = event.target.closest("#scope-switch button");
+  const scopeButton = closest(event.target, "#scope-switch button");
   if (scopeButton) {
-    if (scopeButton.dataset.scope === state.entry.scope) return;
-    state.entry.scope = scopeButton.dataset.scope;
+    const scope = scopeButton.dataset.scope;
+    if (!isScope(scope) || scope === state.entry.scope) return;
+    state.entry.scope = scope;
     for (const row of state.entry.rows) if (!row.id) row.scope = state.entry.scope;
     renderEntry();
     return;
   }
 
-  if (event.target.closest("#add-row")) {
+  if (closest(event.target, "#add-row")) {
     state.entry.rows.push(makeRow());
     renderRows();
     const last = $$("#rows-wrap tbody tr").at(-1);
-    last?.querySelector('[data-field="customer_name"]')?.focus();
+    last?.querySelector<HTMLInputElement>('[data-field="customer_name"]')?.focus();
     return;
   }
 
-  if (event.target.closest("#clear-rows")) {
+  if (closest(event.target, "#clear-rows")) {
     state.entry.editingId = null;
     state.entry.rows = [makeRow()];
     renderEntry();
     return;
   }
 
-  if (event.target.closest("#cancel-edit")) return cancelEdit();
-  if (event.target.closest("#save-rows")) return saveRows();
-  if (event.target.closest("#refresh-recent")) return refreshRecent();
+  if (closest(event.target, "#cancel-edit")) return cancelEdit();
+  if (closest(event.target, "#save-rows")) return saveRows();
+  if (closest(event.target, "#refresh-recent")) return refreshRecent();
 
-  const remove = event.target.closest("[data-remove]")?.dataset.remove;
+  const remove = closest(event.target, "[data-remove]")?.dataset.remove;
   if (remove) {
     state.entry.rows = state.entry.rows.filter((row) => row.uid !== remove);
     if (!state.entry.rows.length) state.entry.rows = [makeRow()];
@@ -1041,25 +1133,33 @@ viewEntry.addEventListener("click", async (event) => {
     return;
   }
 
-  const editId = event.target.closest("[data-edit]")?.dataset.edit;
+  const editId = closest(event.target, "[data-edit]")?.dataset.edit;
   if (editId) {
     const record = state.recent.find((row) => row.id === Number(editId));
     if (record) loadRecordIntoEntry(record);
     return;
   }
 
-  const deleteId = event.target.closest("[data-delete]")?.dataset.delete;
+  const deleteId = closest(event.target, "[data-delete]")?.dataset.delete;
   if (deleteId) await deleteRecord(Number(deleteId), refreshRecent);
 });
 
+const rowFields = ["customer_name", "truck_model", "volume", "remark", "amount_override"] as const;
+
+function applyRowInput(row: EntryRow, field: string | undefined, value: string) {
+  if (field === "scope" && isScope(value)) row.scope = value;
+  const key = rowFields.find((item) => item === field);
+  if (key) row[key] = value;
+}
+
 viewEntry.addEventListener("input", (event) => {
-  const input = event.target.closest("[data-uid]");
+  const input = closest<HTMLInputElement | HTMLSelectElement>(event.target, "[data-uid]");
   if (!input) return;
   const row = findRow(input.dataset.uid);
   if (!row) return;
 
   const field = input.dataset.field;
-  row[field] = input.value;
+  applyRowInput(row, field, input.value);
 
   if (field === "amount_override") {
     updateAmountCells();
@@ -1070,14 +1170,14 @@ viewEntry.addEventListener("input", (event) => {
 });
 
 viewEntry.addEventListener("change", (event) => {
-  const dateInput = event.target.closest("#entry-date");
+  const dateInput = closest<HTMLInputElement>(event.target, "#entry-date");
   if (dateInput) {
     state.entry.date = dateInput.value;
     scheduleAmounts(0);
     return;
   }
 
-  const fileInput = event.target.closest("#photo-file");
+  const fileInput = closest<HTMLInputElement>(event.target, "#photo-file");
   if (fileInput) {
     const file = fileInput.files?.[0];
     if (file) void loadPhotoFile(file);
@@ -1085,12 +1185,12 @@ viewEntry.addEventListener("change", (event) => {
     return;
   }
 
-  const input = event.target.closest("[data-uid]");
+  const input = closest<HTMLInputElement | HTMLSelectElement>(event.target, "[data-uid]");
   if (!input) return;
   const row = findRow(input.dataset.uid);
   if (!row) return;
 
-  row[input.dataset.field] = input.value;
+  applyRowInput(row, input.dataset.field, input.value);
   if (input.dataset.field === "scope") renderRows();
   scheduleAmounts(0);
 });
@@ -1102,7 +1202,7 @@ viewEntry.addEventListener("dragover", (event) => {
 });
 
 viewEntry.addEventListener("dragleave", (event) => {
-  if (event.target.closest("#photo-strip")) $("#photo-strip")?.classList.remove("is-over");
+  if (closest(event.target, "#photo-strip")) $("#photo-strip")?.classList.remove("is-over");
 });
 
 viewEntry.addEventListener("drop", async (event) => {
@@ -1116,27 +1216,15 @@ viewEntry.addEventListener("drop", async (event) => {
 
 /* ---------------------------------------------------------------- 看板 */
 
-function defaultFilters() {
-  const today = state.meta.today;
-  return {
-    scope: "all",
-    from: lunarStartDate() || `${today.slice(0, 8)}01`,
-    to: today,
-    customer: "",
-    model: "",
-    q: "",
-    quick: "lunarYear",
-  };
-}
-
 /** 当前农历年正月初一（由服务端按 ICU 中国历算出），拿不到就退回今年 1 月 1 日 */
 function lunarStartDate() {
   return state.meta?.lunar?.start || "";
 }
 
-function applyQuick(quick) {
-  const today = state.meta.today;
-  const set = (from, to) => {
+function applyQuick(quick: string) {
+  const today = state.meta?.today;
+  if (!today) return;
+  const set = (from: string, to: string) => {
     state.filters.from = from;
     state.filters.to = to;
   };
@@ -1159,29 +1247,31 @@ function applyQuick(quick) {
 }
 
 function renderBoard() {
+  const meta = state.meta;
+  if (!meta) return;
   if (!state.boardInitialized) {
     applyQuick("lunarYear");
     state.boardInitialized = true;
   }
 
-  const options = (kind, selected) =>
+  const options = (kind: DictKind, selected: string) =>
     [`<option value="">全部</option>`]
       .concat(
-        (state.meta.dicts[kind] || []).map(
+        (meta.dicts[kind] || []).map(
           (item) =>
             `<option value="${esc(item.label)}"${item.label === selected ? " selected" : ""}>${esc(item.label)}</option>`,
         ),
       )
       .join("");
 
-  $("#view-board").innerHTML = `
+  requiredElement("#view-board").innerHTML = `
     <div class="stack">
       <div class="card card-tight">
         <form id="filter-form">
           <div class="filter-row">
             <div class="quick-dates" id="quick-dates">
               ${[
-                ["lunarYear", state.meta.lunar ? "农历年" : "今年"],
+                ["lunarYear", meta.lunar ? "农历年" : "今年"],
                 ["month", "本月"],
                 ["lastMonth", "上月"],
                 ["week", "近7天"],
@@ -1204,7 +1294,7 @@ function renderBoard() {
             <label class="field"><span>表</span>
               <select id="f-scope">
                 <option value="all"${state.filters.scope === "all" ? " selected" : ""}>全部</option>
-                ${state.meta.scopes
+                ${meta.scopes
                   .map(
                     (scope) =>
                       `<option value="${scope.key}"${state.filters.scope === scope.key ? " selected" : ""}>${esc(
@@ -1236,17 +1326,18 @@ function renderBoard() {
 }
 
 function readFilters() {
-  state.filters.from = $("#f-from")?.value || "";
-  state.filters.to = $("#f-to")?.value || "";
-  state.filters.scope = $("#f-scope")?.value || "all";
-  state.filters.customer = $("#f-customer")?.value || "";
-  state.filters.model = $("#f-model")?.value || "";
-  state.filters.q = ($("#f-q")?.value || "").trim();
+  state.filters.from = $<HTMLInputElement>("#f-from")?.value || "";
+  state.filters.to = $<HTMLInputElement>("#f-to")?.value || "";
+  const scope = $<HTMLSelectElement>("#f-scope")?.value;
+  state.filters.scope = isScope(scope) ? scope : "all";
+  state.filters.customer = $<HTMLSelectElement>("#f-customer")?.value || "";
+  state.filters.model = $<HTMLSelectElement>("#f-model")?.value || "";
+  state.filters.q = ($<HTMLInputElement>("#f-q")?.value || "").trim();
 }
 
 function filterParams() {
   const params = new URLSearchParams();
-  for (const key of ["scope", "from", "to", "customer", "model", "q"]) {
+  for (const key of ["scope", "from", "to", "customer", "model", "q"] as const) {
     if (state.filters[key]) params.set(key, state.filters[key]);
   }
   return params.toString();
@@ -1257,12 +1348,12 @@ async function loadDashboard() {
   if (grid) grid.innerHTML = `<div class="kpi-group"><div class="kpi-skeleton"></div></div>`.repeat(3);
 
   try {
-    state.dashboard = await api(`/api/dashboard?${filterParams()}`);
+    state.dashboard = await api<DashboardData>(`/api/dashboard?${filterParams()}`);
     state.page = 1;
     renderBoardBody();
   } catch (error) {
     const body = $("#board-body");
-    if (body) body.innerHTML = `<div class="card"><div class="empty">加载失败：${esc(error.message)}</div></div>`;
+    if (body) body.innerHTML = `<div class="card"><div class="empty">加载失败：${esc(errorMessage(error))}</div></div>`;
   }
 }
 
@@ -1276,7 +1367,7 @@ function renderBoardBody() {
   const totalVolume = pump.volume + mixer.volume || 1;
   const pumpShare = Math.round((pump.volume / totalVolume) * 100);
 
-  $("#kpi-grid").innerHTML = `
+  requiredElement("#kpi-grid").innerHTML = `
     <div class="kpi-group is-accent">
       <div class="kpi-group-head">总计 <span class="kpi-range">${esc(rangeLabel())}</span></div>
       <div class="kpi-row"><span>总方量</span><b>${fmt(kpi.volume, 3)}<small>方</small></b></div>
@@ -1313,14 +1404,7 @@ function renderBoardBody() {
   document.body.classList.toggle("health-bad", health === "bad");
   document.body.classList.toggle("health-warn", health === "warn");
 
-  const groups = [
-    ["customer", "按客户"],
-    ["model", "按车型"],
-    ["date", "按日期"],
-    ["scope", "按表"],
-  ];
-
-  $("#board-body").innerHTML = `
+  requiredElement("#board-body").innerHTML = `
     ${notices
       .map((text) => `<div class="card card-tight"><div class="notice"><div class="notice-body">${esc(text)}</div></div></div>`)
       .join("")}
@@ -1355,7 +1439,7 @@ function renderBoardBody() {
             .join("")}
         </div>
         <div class="segmented" id="group-tabs">
-          ${groups
+          ${BOARD_GROUPS
             .map(
               ([key, label]) =>
                 `<button type="button" data-group="${key}" class="${state.groupBy === key ? "is-active" : ""}">${label}</button>`,
@@ -1395,14 +1479,14 @@ function renderChart() {
   }
 
   // 跨度超过两个月就按月聚合，否则按日（农历年视图下按日会把 9 个月压成 16 根柱子）
-  const spanDays = (Date.parse(rows.at(-1).key) - Date.parse(rows[0].key)) / 86400000;
+  const spanDays = (Date.parse(rows[rows.length - 1].key) - Date.parse(rows[0].key)) / 86400000;
   const byMonth = spanDays > 62;
   const list = byMonth ? monthBuckets(rows) : rows.slice(-16);
 
   const metric = state.chartMetric;
-  const pick = (row) => (metric === "amount" ? row.amount : row.volume);
+  const pick = (row: GroupTotals) => (metric === "amount" ? row.amount : row.volume);
   const max = Math.max(...list.map(pick), 1);
-  const label = (row) => (byMonth ? `${Number(row.key.slice(5, 7))}月` : row.key.slice(5));
+  const label = (row: GroupTotals) => (byMonth ? `${Number(row.key.slice(5, 7))}月` : row.key.slice(5));
 
   wrap.innerHTML = `
     <div class="chart-caption">${byMonth ? "按月" : "按日"}${metric === "amount" ? "金额" : "方量"}${
@@ -1423,8 +1507,8 @@ function renderChart() {
   `;
 }
 
-function monthBuckets(rows) {
-  const buckets = new Map();
+function monthBuckets(rows: GroupTotals[]) {
+  const buckets = new Map<string, GroupTotals>();
   for (const row of rows) {
     const key = row.key.slice(0, 7);
     const current = buckets.get(key) || { key, count: 0, volume: 0, amount: 0 };
@@ -1438,10 +1522,11 @@ function monthBuckets(rows) {
 
 function renderGroupTable() {
   const data = state.dashboard;
+  if (!data) return;
   const rows = data.groups[state.groupBy] || [];
   const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0) || 1;
 
-  $("#group-table").innerHTML = rows.length
+  requiredElement("#group-table").innerHTML = rows.length
     ? `<div class="table-wrap list-table-wrap">
         <table class="table">
           <thead><tr><th>名称</th><th class="num">记录数</th><th class="num">方量</th><th class="num">金额</th><th>金额占比</th></tr></thead>
@@ -1489,9 +1574,11 @@ function renderGroupTable() {
     : `<div class="empty">当前筛选条件下没有数据</div>`;
 }
 
-function dayGroups(rows) {
-  const groups = [];
-  let current = null;
+type DayGroup = { key: string; rows: DecoratedRecord[] };
+
+function dayGroups(rows: DecoratedRecord[]) {
+  const groups: DayGroup[] = [];
+  let current: DayGroup | null = null;
   for (const row of rows) {
     const key = row.entry_date || "未填日期";
     if (!current || current.key !== key) {
@@ -1505,6 +1592,7 @@ function dayGroups(rows) {
 
 function renderDetailTable() {
   const data = state.dashboard;
+  if (!data) return;
   const days = dayGroups(data.rows || []);
   const totalPages = Math.max(1, days.length);
   if (state.page > totalPages) state.page = totalPages;
@@ -1527,7 +1615,7 @@ function renderDetailTable() {
     }
   }
 
-  $("#detail-table").innerHTML = slice.length
+  requiredElement("#detail-table").innerHTML = slice.length
     ? `<div class="table-wrap list-table-wrap">
         <table class="table">
           <thead><tr>
@@ -1595,17 +1683,18 @@ function renderDetailTable() {
 
 /* ---------------------------------------------------------------- 看板事件 */
 
-const viewBoard = $("#view-board");
+const viewBoard = requiredElement("#view-board");
 
 viewBoard.addEventListener("click", async (event) => {
-  const quick = event.target.closest("[data-quick]")?.dataset.quick;
+  const quick = closest(event.target, "[data-quick]")?.dataset.quick;
   if (quick) {
     applyQuick(quick);
     renderBoard();
     return;
   }
 
-  const group = event.target.closest("[data-group]")?.dataset.group;
+  const groupKey = closest(event.target, "[data-group]")?.dataset.group;
+  const group = BOARD_GROUPS.find(([key]) => key === groupKey)?.[0];
   if (group) {
     state.groupBy = group;
     $$("#group-tabs button").forEach((button) => button.classList.toggle("is-active", button.dataset.group === group));
@@ -1613,40 +1702,40 @@ viewBoard.addEventListener("click", async (event) => {
     return;
   }
 
-  const metric = event.target.closest("[data-metric]")?.dataset.metric;
-  if (metric) {
+  const metric = closest(event.target, "[data-metric]")?.dataset.metric;
+  if (metric === "amount" || metric === "volume") {
     state.chartMetric = metric;
     $$("#chart-metric button").forEach((button) => button.classList.toggle("is-active", button.dataset.metric === metric));
     renderChart();
     return;
   }
 
-  if (event.target.closest("#export-btn")) {
+  if (closest(event.target, "#export-btn")) {
     readFilters();
     window.location.href = `/api/export.csv?${filterParams()}`;
     return;
   }
 
-  const page = event.target.closest("[data-page]")?.dataset.page;
+  const page = closest(event.target, "[data-page]")?.dataset.page;
   if (page) {
     state.page += page === "next" ? 1 : -1;
     renderDetailTable();
     return;
   }
 
-  const editId = event.target.closest("#detail-table [data-edit]")?.dataset.edit;
+  const editId = closest(event.target, "#detail-table [data-edit]")?.dataset.edit;
   if (editId) {
-    const record = state.dashboard.rows.find((row) => row.id === Number(editId));
+    const record = state.dashboard?.rows.find((row) => row.id === Number(editId));
     if (record) loadRecordIntoEntry(record);
     return;
   }
 
-  const deleteId = event.target.closest("#detail-table [data-delete]")?.dataset.delete;
+  const deleteId = closest(event.target, "#detail-table [data-delete]")?.dataset.delete;
   if (deleteId) await deleteRecord(Number(deleteId), loadDashboard);
 });
 
 viewBoard.addEventListener("submit", (event) => {
-  if (!event.target.closest("#filter-form")) return;
+  if (!closest(event.target, "#filter-form")) return;
   event.preventDefault();
   readFilters();
   state.filters.quick = "";
@@ -1655,8 +1744,8 @@ viewBoard.addEventListener("submit", (event) => {
 
 /* ---------------------------------------------------------------- 配置页 */
 
-function customerOptions(selected) {
-  const items = state.meta.dicts.customer || [];
+function customerOptions(selected: string) {
+  const items = state.meta?.dicts.customer || [];
   return [`<option value=""${selected ? "" : " selected"}>（空）</option>`]
     .concat(
       items.map(
@@ -1666,8 +1755,8 @@ function customerOptions(selected) {
     .join("");
 }
 
-function modelOptions(selected) {
-  const items = state.meta.dicts.truck_model || [];
+function modelOptions(selected: string) {
+  const items = state.meta?.dicts.truck_model || [];
   return [`<option value=""${selected ? "" : " selected"}>（空）</option>`]
     .concat(
       items.map(
@@ -1677,14 +1766,14 @@ function modelOptions(selected) {
     .join("");
 }
 
-function previewSample(scopeKey) {
+function previewSample(scopeKey: Scope): PreviewSample {
   if (!state.preview[scopeKey]) {
-    const customers = state.meta.dicts.customer || [];
+    const customers = state.meta?.dicts.customer || [];
     const preferred = customers.find((item) => item.label === "蒲发混凝土") || customers[0];
     state.preview[scopeKey] = {
       customer: preferred?.label || "",
-      model: (state.meta.dicts.truck_model || [])[0]?.label || "",
-      date: state.meta.today,
+      model: (state.meta?.dicts.truck_model || [])[0]?.label || "",
+      date: state.meta?.today || "",
     };
   }
   return state.preview[scopeKey];
@@ -1692,9 +1781,10 @@ function previewSample(scopeKey) {
 
 function renderConfig() {
   const meta = state.meta;
+  if (!meta) return;
   const usesPrice = Boolean(meta.usesPrice);
 
-  $("#view-config").innerHTML = `
+  requiredElement("#view-config").innerHTML = `
     <div class="stack">
       <div class="card">
         <div class="card-head">
@@ -1705,7 +1795,7 @@ function renderConfig() {
           <div class="spacer"></div>
           <span class="badge">不使用 eval · 语法安全</span>
         </div>
-        <div class="rule-grid">${meta.scopes.map((scope) => ruleCardHtml(scope)).join("")}</div>
+        <div class="rule-grid">${meta.scopes.map((scope) => ruleCardHtml(scope, meta)).join("")}</div>
       </div>
 
       <div class="card">
@@ -1713,7 +1803,7 @@ function renderConfig() {
           <div><h2 class="card-title">名称选项</h2><p class="card-desc">录入时的候选值；直接输入新名称也会自动收录</p></div>
         </div>
         <div class="config-grid" id="dict-grid">
-          ${Object.keys(meta.dictKinds).map((kind) => dictColumnHtml(kind)).join("")}
+          ${Object.keys(meta.dictKinds).filter(isDictKind).map((kind) => dictColumnHtml(kind, meta)).join("")}
         </div>
       </div>
 
@@ -1756,8 +1846,8 @@ function renderConfig() {
   for (const scope of meta.scopes) computePreview(scope.key);
 }
 
-function ruleCardHtml(scope) {
-  const formula = state.meta.formulas[scope.key] || {
+function ruleCardHtml(scope: ScopeDefinition, meta: MetaData) {
+  const formula = meta.formulas[scope.key] || {
     volume_formula: "",
     amount_formula: "",
     amount_decimals: 2,
@@ -1781,7 +1871,7 @@ function ruleCardHtml(scope) {
       </label>
 
       <div class="vars" data-vars="${scope.key}">
-        ${state.meta.variables
+        ${meta.variables
           .map((name) => `<button class="var-chip" type="button" data-var="${esc(name)}">${esc(name)}</button>`)
           .join("")}
       </div>
@@ -1801,7 +1891,7 @@ function ruleCardHtml(scope) {
           </select>
         </div>
         <div class="func-list">
-          ${state.meta.functions.map((fn) => `<div><code>${esc(fn.syntax)}</code><span>${esc(fn.description)}</span></div>`).join("")}
+          ${meta.functions.map((fn) => `<div><code>${esc(fn.syntax)}</code><span>${esc(fn.description)}</span></div>`).join("")}
         </div>
       </details>
 
@@ -1830,9 +1920,9 @@ function ruleCardHtml(scope) {
   `;
 }
 
-function dictColumnHtml(kind) {
-  const label = state.meta.dictKinds[kind]?.label || kind;
-  const items = state.meta.dicts[kind] || [];
+function dictColumnHtml(kind: DictKind, meta: MetaData) {
+  const label = meta.dictKinds[kind]?.label || kind;
+  const items = meta.dicts[kind] || [];
 
   return `
     <div class="dict-column" data-kind="${kind}">
@@ -1856,23 +1946,23 @@ function dictColumnHtml(kind) {
 }
 
 const PREVIEW_VOLUMES = [8, 10, 20, 30, 40, 88];
-let previewTimers = new Map();
+const previewTimers = new Map<Scope, number>();
 
-function schedulePreview(scopeKey, delay = 450) {
-  clearTimeout(previewTimers.get(scopeKey));
+function schedulePreview(scopeKey: Scope, delay = 450) {
+  window.clearTimeout(previewTimers.get(scopeKey));
   previewTimers.set(
     scopeKey,
-    setTimeout(() => void computePreview(scopeKey), delay),
+    window.setTimeout(() => void computePreview(scopeKey), delay),
   );
 }
 
-async function computePreview(scopeKey) {
+async function computePreview(scopeKey: Scope) {
   // 用 .rule-card 限定：录入页的「泵车/搅拌车」按钮也带 data-scope
   const card = $(".rule-card" + `[data-scope="${scopeKey}"]`);
   const target = $(`.preview-result[data-preview="${scopeKey}"]`);
   if (!card || !target) return;
 
-  const expression = card.querySelector('[data-formula="amount_formula"]').value.trim() || "0";
+  const expression = requiredElement<HTMLInputElement>('[data-formula="amount_formula"]', card).value.trim() || "0";
   const sample = previewSample(scopeKey);
   const body = {
     scope: scopeKey,
@@ -1883,23 +1973,23 @@ async function computePreview(scopeKey) {
     remark: "",
   };
 
-  const results = [];
+  const results: { volume: number; amount: number | null; error: string }[] = [];
   for (const volume of PREVIEW_VOLUMES) {
     try {
-      const result = await api("/api/evaluate", { method: "POST", body: { ...body, volume } });
+      const result = await api<EvaluationData>("/api/evaluate", { method: "POST", body: { ...body, volume } });
       results.push({ volume, amount: result.ok ? Number(result.value) : null, error: result.ok ? "" : result.error });
     } catch (error) {
-      results.push({ volume, amount: null, error: error.message });
+      results.push({ volume, amount: null, error: errorMessage(error) });
     }
   }
 
-  const ok = results.filter((item) => item.amount !== null);
-  if (!ok.length) {
+  const amounts = results.map((item) => item.amount).filter((amount) => amount !== null);
+  if (!amounts.length) {
     target.innerHTML = `<div class="empty">${esc(results[0]?.error || "公式无法计算")}</div>`;
     return;
   }
 
-  const max = Math.max(...ok.map((item) => item.amount), 1);
+  const max = Math.max(...amounts, 1);
 
   target.innerHTML = `
     <table class="mini-table">
@@ -1929,8 +2019,8 @@ async function computePreview(scopeKey) {
 
 function renderPriceTable() {
   const wrap = $("#price-table");
-  if (!wrap) return;
-  const prices = state.meta.prices;
+  const prices = state.meta?.prices;
+  if (!wrap || !prices) return;
 
   wrap.innerHTML = prices.length
     ? `<div class="table-wrap">
@@ -1958,13 +2048,13 @@ function renderPriceTable() {
 
 /* ---------------------------------------------------------------- 配置页事件 */
 
-const viewConfig = $("#view-config");
-let lastFormulaInput = null;
+const viewConfig = requiredElement("#view-config");
+let lastFormulaInput: HTMLInputElement | null = null;
 
 viewConfig.addEventListener("click", async (event) => {
-  const addKind = event.target.closest("[data-add-dict]")?.dataset.addDict;
-  if (addKind) {
-    const input = $(`#new-${addKind}`);
+  const addKind = closest(event.target, "[data-add-dict]")?.dataset.addDict;
+  if (isDictKind(addKind)) {
+    const input = $<HTMLInputElement>(`#new-${addKind}`);
     const label = (input?.value || "").trim();
     if (!label) return toast("请输入名称", true);
     try {
@@ -1972,139 +2062,143 @@ viewConfig.addEventListener("click", async (event) => {
       toast("已添加");
       await refreshDicts(addKind);
     } catch (error) {
-      toast(error.message, true);
+      toast(errorMessage(error), true);
     }
     return;
   }
 
-  const delId = event.target.closest("[data-del-dict]")?.dataset.delDict;
+  const delId = closest(event.target, "[data-del-dict]")?.dataset.delDict;
   if (delId) {
     if (!window.confirm("删除这个选项？已录入的记录不受影响。")) return;
-    const column = event.target.closest(".dict-column");
+    const column = closest(event.target, ".dict-column");
     const kind = column?.dataset.kind;
     try {
       await api(`/api/dicts/${delId}`, { method: "DELETE" });
       toast("已删除");
-      if (kind) await refreshDicts(kind);
+      if (isDictKind(kind)) await refreshDicts(kind);
     } catch (error) {
-      toast(error.message, true);
+      toast(errorMessage(error), true);
     }
     return;
   }
 
-  const saveScope = event.target.closest("[data-save-formula]")?.dataset.saveFormula;
-  if (saveScope) {
-    const card = $(".rule-card" + `[data-scope="${saveScope}"]`);
+  const saveScope = closest(event.target, "[data-save-formula]")?.dataset.saveFormula;
+  if (isScope(saveScope)) {
+    const card = $(`.rule-card[data-scope="${saveScope}"]`);
+    if (!card) return;
     const body = {
       scope: saveScope,
-      volume_formula: card.querySelector('[data-formula="volume_formula"]').value.trim(),
-      amount_formula: card.querySelector('[data-formula="amount_formula"]').value.trim(),
-      amount_decimals: Number(card.querySelector('[data-formula="amount_decimals"]').value),
+      volume_formula: requiredElement<HTMLInputElement>('[data-formula="volume_formula"]', card).value.trim(),
+      amount_formula: requiredElement<HTMLInputElement>('[data-formula="amount_formula"]', card).value.trim(),
+      amount_decimals: Number(requiredElement<HTMLSelectElement>('[data-formula="amount_decimals"]', card).value),
     };
     try {
       await api("/api/formulas", { method: "PUT", body });
-      state.meta = await api("/api/meta");
+      state.meta = await api<MetaData>("/api/meta");
       const saved = $(`[data-saved="${saveScope}"]`);
       if (saved) saved.textContent = state.meta.formulas[saveScope].amount_formula;
       toast("规则已保存");
       computePreview(saveScope);
     } catch (error) {
-      toast(error.message, true);
+      toast(errorMessage(error), true);
     }
     return;
   }
 
-  const resetScope = event.target.closest("[data-reset-formula]")?.dataset.resetFormula;
-  if (resetScope) {
-    const defaults = state.meta.formulaDefaults?.[resetScope];
+  const resetScope = closest(event.target, "[data-reset-formula]")?.dataset.resetFormula;
+  if (isScope(resetScope)) {
+    const defaults = state.meta?.formulaDefaults?.[resetScope];
     if (!defaults) return toast("没有默认公式", true);
-    const card = $(".rule-card" + `[data-scope="${resetScope}"]`);
-    card.querySelector('[data-formula="amount_formula"]').value = defaults.amount_formula;
-    card.querySelector('[data-formula="volume_formula"]').value = defaults.volume_formula;
-    card.querySelector('[data-formula="amount_decimals"]').value = String(defaults.amount_decimals ?? 2);
+    const card = $(`.rule-card[data-scope="${resetScope}"]`);
+    if (!card) return;
+    requiredElement<HTMLInputElement>('[data-formula="amount_formula"]', card).value = defaults.amount_formula;
+    requiredElement<HTMLInputElement>('[data-formula="volume_formula"]', card).value = defaults.volume_formula;
+    requiredElement<HTMLSelectElement>('[data-formula="amount_decimals"]', card).value = String(defaults.amount_decimals ?? 2);
     computePreview(resetScope);
     toast("已填入默认公式，记得点保存");
     return;
   }
 
-  const varName = event.target.closest("[data-var]")?.dataset.var;
+  const varName = closest(event.target, "[data-var]")?.dataset.var;
   if (varName) {
-    const card = event.target.closest("[data-scope]");
-    const fallback = card.querySelector('[data-formula="amount_formula"]');
+    const card = closest(event.target, "[data-scope]");
+    if (!card) return;
+    const fallback = requiredElement<HTMLInputElement>('[data-formula="amount_formula"]', card);
     const focused = lastFormulaInput && card.contains(lastFormulaInput) ? lastFormulaInput : fallback;
     insertAtCursor(focused, varName);
-    schedulePreview(card.dataset.scope, 200);
+    if (isScope(card.dataset.scope)) schedulePreview(card.dataset.scope, 200);
     return;
   }
 
-  const delPrice = event.target.closest("[data-del-price]")?.dataset.delPrice;
+  const delPrice = closest(event.target, "[data-del-price]")?.dataset.delPrice;
   if (delPrice) {
     if (!window.confirm("删除这条单价？")) return;
     try {
       await api(`/api/prices/${delPrice}`, { method: "DELETE" });
       toast("已删除");
-      state.meta = await api("/api/meta");
+      state.meta = await api<MetaData>("/api/meta");
       renderPriceTable();
     } catch (error) {
-      toast(error.message, true);
+      toast(errorMessage(error), true);
     }
   }
 });
 
 viewConfig.addEventListener("input", (event) => {
-  const input = event.target.closest("[data-formula]");
+  const input = closest(event.target, "[data-formula]");
   if (!input) return;
-  const card = input.closest("[data-scope]");
-  if (input.dataset.formula === "amount_formula") schedulePreview(card.dataset.scope);
+  const scope = input.closest<HTMLElement>("[data-scope]")?.dataset.scope;
+  if (input.dataset.formula === "amount_formula" && isScope(scope)) schedulePreview(scope);
 });
 
 viewConfig.addEventListener("focusin", (event) => {
-  const input = event.target.closest("[data-formula]");
-  if (input) lastFormulaInput = input;
+  const input = closest(event.target, "[data-formula]");
+  if (input instanceof HTMLInputElement) lastFormulaInput = input;
 });
 
 viewConfig.addEventListener("change", (event) => {
-  const control = event.target.closest("[data-preview]");
+  const control = closest<HTMLInputElement | HTMLSelectElement>(event.target, "[data-preview]");
   if (!control) return;
   const scopeKey = control.dataset.previewScope;
   const field = control.dataset.preview;
+  if (!isScope(scopeKey) || (field !== "customer" && field !== "model" && field !== "date")) return;
   const sample = previewSample(scopeKey);
   sample[field] = control.value;
   computePreview(scopeKey);
 });
 
 viewConfig.addEventListener("submit", async (event) => {
-  if (!event.target.closest("#price-form")) return;
+  if (!closest(event.target, "#price-form")) return;
   event.preventDefault();
 
   const body = {
-    scope: $("#p-scope").value,
-    customer_name: $("#p-customer").value.trim() || "*",
-    truck_model: $("#p-model").value.trim() || "*",
-    price: Number($("#p-price").value),
-    note: $("#p-note").value.trim(),
+    scope: requiredElement<HTMLSelectElement>("#p-scope").value,
+    customer_name: requiredElement<HTMLInputElement>("#p-customer").value.trim() || "*",
+    truck_model: requiredElement<HTMLInputElement>("#p-model").value.trim() || "*",
+    price: Number(requiredElement<HTMLInputElement>("#p-price").value),
+    note: requiredElement<HTMLInputElement>("#p-note").value.trim(),
   };
   if (!Number.isFinite(body.price) || body.price < 0) return toast("单价必须是不小于 0 的数字", true);
 
   try {
     await api("/api/prices", { method: "POST", body });
     toast("单价已保存");
-    $("#p-price").value = "";
-    $("#p-note").value = "";
-    state.meta = await api("/api/meta");
+    requiredElement<HTMLInputElement>("#p-price").value = "";
+    requiredElement<HTMLInputElement>("#p-note").value = "";
+    state.meta = await api<MetaData>("/api/meta");
     renderPriceTable();
   } catch (error) {
-    toast(error.message, true);
+    toast(errorMessage(error), true);
   }
 });
 
-async function refreshDicts(kind) {
-  state.meta = await api("/api/meta");
+async function refreshDicts(kind: DictKind) {
+  state.meta = await api<MetaData>("/api/meta");
   const column = $(`.dict-column[data-kind="${kind}"]`);
-  if (column) column.outerHTML = dictColumnHtml(kind);
+  if (column) column.outerHTML = dictColumnHtml(kind, state.meta);
 }
 
-function insertAtCursor(input, text) {
+function insertAtCursor(input: HTMLInputElement, text: string) {
   const start = input.selectionStart ?? input.value.length;
   const end = input.selectionEnd ?? input.value.length;
   input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
@@ -2116,5 +2210,5 @@ function insertAtCursor(input, text) {
 
 boot().catch((error) => {
   console.error(error);
-  toast(error.message || "初始化失败", true);
+  toast(errorMessage(error) || "初始化失败", true);
 });

@@ -10,17 +10,21 @@
  * 设计上不使用 eval / new Function，防止公式被用来执行任意代码。
  */
 
+import type { FormulaValue, FormulaValues, PriceLookup } from "../shared/types.js";
+
 export class FormulaError extends Error {
-  constructor(message, position = -1) {
+  readonly position: number;
+
+  constructor(message: string, position = -1) {
     super(message);
     this.name = "FormulaError";
     this.position = position;
   }
 }
 
-const OPERATORS = ["&&", "||", "==", "!=", "<=", ">=", "+", "-", "*", "/", "%", "<", ">", "(", ")", ",", "!", "?"];
+const OPERATORS = ["&&", "||", "==", "!=", "<=", ">=", "+", "-", "*", "/", "%", "<", ">", "(", ")", ",", "!", "?"] as const;
 
-const PRECEDENCE = {
+const PRECEDENCE: Partial<Record<Operator, number>> = {
   "||": 1,
   "&&": 2,
   "==": 3,
@@ -35,6 +39,29 @@ const PRECEDENCE = {
   "/": 6,
   "%": 6,
 };
+
+type Operator = (typeof OPERATORS)[number];
+type UnaryOperator = "+" | "-" | "!";
+
+type Token = (
+  | { type: "number"; value: number }
+  | { type: "string" | "ident" | "end"; value: string }
+  | { type: "op"; value: Operator }
+) & { pos: number };
+
+type Expression =
+  | { type: "number"; value: number }
+  | { type: "string"; value: string }
+  | { type: "variable"; name: string; pos: number }
+  | { type: "call"; name: string; args: Expression[]; pos: number }
+  | { type: "unary"; op: UnaryOperator; argument: Expression }
+  | { type: "binary"; op: Operator; left: Expression; right: Expression };
+
+interface FormulaContext {
+  values: FormulaValues;
+  missingPrices: Set<string>;
+  price(customer?: FormulaValue, model?: FormulaValue): number;
+}
 
 const FULL_WIDTH = [
   ["（", "("],
@@ -54,7 +81,7 @@ const FULL_WIDTH = [
   ["≥", ">="],
 ];
 
-function normalize(source) {
+function normalize(source: unknown) {
   let text = String(source ?? "");
   for (const [from, to] of FULL_WIDTH) {
     text = text.split(from).join(to);
@@ -62,9 +89,9 @@ function normalize(source) {
   return text;
 }
 
-export function tokenize(source) {
+export function tokenize(source: unknown) {
   const text = normalize(source);
-  const tokens = [];
+  const tokens: Token[] = [];
   let index = 0;
 
   while (index < text.length) {
@@ -112,10 +139,9 @@ export function tokenize(source) {
 }
 
 class Parser {
-  constructor(tokens) {
-    this.tokens = tokens;
-    this.index = 0;
-  }
+  private index = 0;
+
+  constructor(private readonly tokens: Token[]) {}
 
   peek() {
     return this.tokens[this.index];
@@ -125,12 +151,12 @@ class Parser {
     return this.tokens[this.index++];
   }
 
-  isOp(value) {
+  isOp(value: Operator) {
     const token = this.peek();
     return token.type === "op" && token.value === value;
   }
 
-  expectOp(value) {
+  expectOp(value: Operator) {
     const token = this.next();
     if (token.type !== "op" || token.value !== value) {
       throw new FormulaError(`缺少“${value}”`, token.pos);
@@ -146,7 +172,7 @@ class Parser {
     return node;
   }
 
-  parseExpression(minPrecedence) {
+  parseExpression(minPrecedence: number): Expression {
     let left = this.parseUnary();
 
     for (;;) {
@@ -162,7 +188,7 @@ class Parser {
     return left;
   }
 
-  parseUnary() {
+  parseUnary(): Expression {
     const token = this.peek();
     if (token.type === "op" && (token.value === "-" || token.value === "+" || token.value === "!")) {
       this.next();
@@ -171,7 +197,7 @@ class Parser {
     return this.parsePrimary();
   }
 
-  parsePrimary() {
+  parsePrimary(): Expression {
     const token = this.next();
 
     if (token.type === "number") return { type: "number", value: token.value };
@@ -207,18 +233,19 @@ class Parser {
   }
 }
 
-const parseCache = new Map();
+const parseCache = new Map<string, Expression>();
 
-export function parseFormula(source) {
+export function parseFormula(source: unknown) {
   const key = String(source ?? "");
-  if (parseCache.has(key)) return parseCache.get(key);
+  const cached = parseCache.get(key);
+  if (cached) return cached;
   const ast = new Parser(tokenize(key)).parse();
   if (parseCache.size > 200) parseCache.clear();
   parseCache.set(key, ast);
   return ast;
 }
 
-function toNumber(value, label) {
+function toNumber(value: FormulaValue, label: string) {
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new FormulaError(`“${label}”不是有效数字`);
     return value;
@@ -231,12 +258,12 @@ function toNumber(value, label) {
   return number;
 }
 
-function toText(value) {
+function toText(value: FormulaValue) {
   if (value === null || value === undefined) return "";
   return String(value);
 }
 
-function compare(left, right) {
+function compare(left: FormulaValue, right: FormulaValue) {
   const leftNumber = typeof left === "number" ? left : Number(String(left ?? "").trim());
   const rightNumber = typeof right === "number" ? right : Number(String(right ?? "").trim());
   const bothNumeric = Number.isFinite(leftNumber) && Number.isFinite(rightNumber);
@@ -244,8 +271,8 @@ function compare(left, right) {
   return { a: toText(left), b: toText(right) };
 }
 
-function makeContext(values, priceLookup) {
-  const context = {
+function makeContext(values: FormulaValues, priceLookup: PriceLookup): FormulaContext {
+  const context: FormulaContext = {
     values,
     missingPrices: new Set(),
     price(customer, model) {
@@ -262,8 +289,9 @@ function makeContext(values, priceLookup) {
   return context;
 }
 
-export function evaluateAst(node, context) {
-  switch (node.type) {
+export function evaluateAst(node: Expression, context: FormulaContext): FormulaValue {
+  const { type } = node;
+  switch (type) {
     case "number":
       return node.value;
 
@@ -351,11 +379,11 @@ export function evaluateAst(node, context) {
     }
 
     default:
-      throw new FormulaError(`不支持的表达：${node.type}`);
+      throw new FormulaError(`不支持的表达：${type}`);
   }
 }
 
-const FUNCTIONS = {
+const FUNCTIONS: Record<string, (context: FormulaContext, args: FormulaValue[]) => FormulaValue> = {
   单价(context, args) {
     return context.price(args[0], args[1]);
   },
@@ -400,7 +428,7 @@ const FUNCTIONS = {
     return FUNCTIONS.abs(_context, args);
   },
   sum(_context, args) {
-    return args.reduce((total, value) => total + toNumber(value, "sum 参数"), 0);
+    return args.reduce<number>((total, value) => total + toNumber(value, "sum 参数"), 0);
   },
   合计(_context, args) {
     return FUNCTIONS.sum(_context, args);
@@ -429,7 +457,7 @@ export const FORMULA_FUNCTIONS = [
  * 解析备注中的方量算式，如 “12*2+11” → 35，“12*2 10*2+9+3.5” → 56.5。
  * 支持按 “驾驶员：算式” 分行书写，空格视为相加。
  */
-export function evaluateRemarkExpression(raw) {
+export function evaluateRemarkExpression(raw: unknown) {
   const text = String(raw ?? "").trim();
   if (!text) return { value: 0, error: "备注为空，无法计算方量" };
 
@@ -468,7 +496,7 @@ export function evaluateRemarkExpression(raw) {
 }
 
 /** 只允许数字与四则运算，供 “算式()” 使用。 */
-export function evaluateArithmetic(expression) {
+export function evaluateArithmetic(expression: unknown) {
   const text = String(expression ?? "").trim();
   if (!text) return null;
   if (!/^[0-9+\-*/%().\s]+$/.test(text)) return null;
@@ -481,7 +509,7 @@ export function evaluateArithmetic(expression) {
   }
 }
 
-export function roundNumber(value, digits = 2) {
+export function roundNumber(value: number, digits = 2) {
   if (!Number.isFinite(value)) return 0;
   const factor = 10 ** digits;
   return Math.round((value + Number.EPSILON) * factor) / factor;
@@ -489,11 +517,8 @@ export function roundNumber(value, digits = 2) {
 
 /**
  * 计算一条记录的金额。
- * @param {string} formula 金额公式
- * @param {Record<string, unknown>} values 列名 → 值（已包含“单价”）
- * @param {(customer: string, model: string) => {price: number, missing: boolean, source?: string}} priceLookup
  */
-export function computeAmount(formula, values, priceLookup, decimals = 2) {
+export function computeAmount(formula: string, values: FormulaValues, priceLookup: PriceLookup, decimals = 2) {
   try {
     const context = makeContext(values, priceLookup);
     const ast = parseFormula(formula);
@@ -507,14 +532,14 @@ export function computeAmount(formula, values, priceLookup, decimals = 2) {
   } catch (error) {
     return {
       amount: 0,
-      error: error instanceof FormulaError ? error.message : String(error?.message || error),
+      error: error instanceof FormulaError ? error.message : String(error),
       missingPrices: [],
     };
   }
 }
 
 /** 供前端/接口做公式校验与试算。 */
-export function evaluateFormula(formula, values, priceLookup) {
+export function evaluateFormula(formula: string, values: FormulaValues, priceLookup: PriceLookup) {
   try {
     const context = makeContext(values, priceLookup);
     const ast = parseFormula(formula);
@@ -529,7 +554,7 @@ export function evaluateFormula(formula, values, priceLookup) {
     return {
       ok: false,
       value: 0,
-      error: error instanceof FormulaError ? error.message : String(error?.message || error),
+      error: error instanceof FormulaError ? error.message : String(error),
       missingPrices: [],
     };
   }

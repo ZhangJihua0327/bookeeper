@@ -79,7 +79,8 @@ test("搅拌车方量与备注算式对不上时自动标出来并降置信度",
 
   assert.equal(result.entries[0].uncertain.includes("volume"), false);
   assert.equal(result.entries[1].uncertain.includes("volume"), true);
-  assert.ok(result.entries[1].confidence <= 0.5);
+  const confidence = result.entries[1].confidence;
+  assert.ok(confidence !== null && confidence <= 0.5);
 });
 
 test("同一客户的搅拌车多行合并成一条（方量相加、明细换行）", () => {
@@ -104,8 +105,8 @@ test("同一客户的搅拌车多行合并成一条（方量相加、明细换�
 
 test("合并只作用于搅拌车，泵车同客户多条保持独立", () => {
   const merged = mergeMixerEntries([
-    { table: "pump", customer: "贾建", volume: 11, note: "圈梁", raw: "", confidence: null, uncertain: [] },
-    { table: "pump", customer: "贾建", volume: 8, note: "板坪", raw: "", confidence: null, uncertain: [] },
+    { table: "pump", customer: "贾建", truck_model: "", volume: 11, note: "圈梁", raw: "", confidence: null, uncertain: [] },
+    { table: "pump", customer: "贾建", truck_model: "", volume: 8, note: "板坪", raw: "", confidence: null, uncertain: [] },
   ]);
   assert.equal(merged.length, 2);
   assert.equal(merged[1].volume, 8);

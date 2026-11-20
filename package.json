@@ -8,11 +8,19 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node src/server/index.js",
-    "dev": "node --watch src/server/index.js",
-    "test": "node --test tests/*.test.mjs"
+    "build": "tsc -p tsconfig.build.json && npm run copy:assets",
+    "copy:assets": "node -e \"const {cpSync}=require('node:fs'); cpSync('src/public','dist/src/public',{recursive:true,filter:file=>!file.endsWith('.ts')}); cpSync('db/schema.sql','dist/db/schema.sql')\"",
+    "start": "node dist/src/server/index.js",
+    "dev": "npm run copy:assets && tsc-watch --project tsconfig.build.json --onSuccess \"npm start\"",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc && npm run copy:assets && cd dist/tests && node --test"
   },
   "dependencies": {
     "mysql2": "3.11.5"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "tsc-watch": "7.2.1",
+    "typescript": "5.9.3"
   }
 }

@@ -4,16 +4,20 @@
 
 import { buildPriceIndex } from "./prices.js";
 
-export class MemoryStore {
-  constructor() {
-    this.dicts = [];
-    this.prices = [];
-    this.formulas = {};
-    this.records = [];
-    this.dictId = 1;
-    this.priceId = 1;
-    this.recordId = 1;
-  }
+import type {
+  DictInput, DictItem, DictPatch, FormulaInput, Formulas, LedgerRecord, PriceInput,
+  RecordFilters, RecordInput, Scope, UnitPrice,
+} from "../shared/types.js";
+import type { LedgerStore } from "./ledger-store.js";
+
+export class MemoryStore implements LedgerStore {
+  private dicts: DictItem[] = [];
+  private prices: UnitPrice[] = [];
+  private formulas: Partial<Formulas> = {};
+  private records: LedgerRecord[] = [];
+  private dictId = 1;
+  private priceId = 1;
+  private recordId = 1;
 
   async ping() {
     return true;
@@ -23,7 +27,7 @@ export class MemoryStore {
     return true;
   }
 
-  async seedDicts(items) {
+  async seedDicts(items: DictInput[]) {
     for (const item of items) {
       const exists = this.dicts.some(
         (entry) => entry.kind === item.kind && entry.scope === (item.scope || "both") && entry.label === item.label,
@@ -45,7 +49,7 @@ export class MemoryStore {
     return this.dicts.filter((item) => item.active === 1);
   }
 
-  async addDict({ kind, scope = "both", label, sort_order = 0 }) {
+  async addDict({ kind, scope = "both", label, sort_order = 0 }: DictInput) {
     const existing = this.dicts.find(
       (item) => item.kind === kind && item.scope === scope && item.label === label,
     );
@@ -58,14 +62,14 @@ export class MemoryStore {
     return { ...item };
   }
 
-  async updateDict(id, patch) {
+  async updateDict(id: number, patch: DictPatch) {
     const item = this.dicts.find((entry) => entry.id === id);
     if (!item) return null;
     Object.assign(item, patch);
     return { ...item };
   }
 
-  async deleteDict(id) {
+  async deleteDict(id: number) {
     const index = this.dicts.findIndex((entry) => entry.id === id);
     if (index < 0) return false;
     this.dicts.splice(index, 1);
@@ -76,9 +80,9 @@ export class MemoryStore {
     return this.prices.map((item) => ({ ...item }));
   }
 
-  async savePrice({ id, scope, customer_name = "*", truck_model = "*", price = 0, note = "" }) {
+  async savePrice({ id, scope, customer_name = "*", truck_model = "*", price = 0, note = "" }: PriceInput) {
     const numeric = Number(price) || 0;
-    if (id) {
+    if (id !== undefined) {
       const item = this.prices.find((entry) => entry.id === id);
       if (!item) return null;
       Object.assign(item, { customer_name, truck_model, price: numeric, note });
@@ -98,27 +102,28 @@ export class MemoryStore {
     return { ...item };
   }
 
-  async deletePrice(id) {
+  async deletePrice(id: number) {
     const index = this.prices.findIndex((entry) => entry.id === id);
     if (index < 0) return false;
     this.prices.splice(index, 1);
     return true;
   }
 
-  async getFormulas() {
+  async getFormulas(): Promise<Partial<Formulas>> {
     return JSON.parse(JSON.stringify(this.formulas));
   }
 
-  async saveFormula({ scope, volume_formula, amount_formula, amount_decimals = 2 }) {
+  async saveFormula({ scope, volume_formula, amount_formula, amount_decimals = 2 }: FormulaInput) {
     this.formulas[scope] = { volume_formula, amount_formula, amount_decimals: Number(amount_decimals) };
     return { scope, ...this.formulas[scope] };
   }
 
-  async listRecords(filter = {}) {
+  async listRecords(filter: RecordFilters = {}) {
     let rows = [...this.records];
     if (filter.scope && filter.scope !== "all") rows = rows.filter((row) => row.scope === filter.scope);
-    if (filter.from) rows = rows.filter((row) => row.entry_date >= filter.from);
-    if (filter.to) rows = rows.filter((row) => row.entry_date <= filter.to);
+    const { from, to } = filter;
+    if (from) rows = rows.filter((row) => row.entry_date >= from);
+    if (to) rows = rows.filter((row) => row.entry_date <= to);
     if (filter.customer) rows = rows.filter((row) => row.customer_name === filter.customer);
     if (filter.model) rows = rows.filter((row) => row.truck_model === filter.model);
     if (filter.q) {
@@ -133,12 +138,12 @@ export class MemoryStore {
     return rows.map((row) => ({ ...row }));
   }
 
-  async getRecord(id) {
+  async getRecord(id: number) {
     const row = this.records.find((entry) => entry.id === Number(id));
     return row ? { ...row } : null;
   }
 
-  async createRecord(input) {
+  async createRecord(input: RecordInput) {
     const row = {
       id: this.recordId++,
       scope: input.scope,
@@ -153,7 +158,7 @@ export class MemoryStore {
     return { ...row };
   }
 
-  async updateRecord(id, input) {
+  async updateRecord(id: number, input: RecordInput) {
     const row = this.records.find((entry) => entry.id === Number(id));
     if (!row) return null;
     Object.assign(row, {
@@ -168,14 +173,14 @@ export class MemoryStore {
     return { ...row };
   }
 
-  async deleteRecord(id) {
+  async deleteRecord(id: number) {
     const index = this.records.findIndex((entry) => entry.id === Number(id));
     if (index < 0) return false;
     this.records.splice(index, 1);
     return true;
   }
 
-  async resolvePrice(scope, customerName, truckModel) {
+  async resolvePrice(scope: Scope, customerName: string, truckModel: string) {
     const index = buildPriceIndex(this.prices);
     return index.resolve(scope, customerName, truckModel);
   }

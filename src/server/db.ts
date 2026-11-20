@@ -1,6 +1,9 @@
+import type { Pool } from "mysql2/promise";
 import mysql from "mysql2/promise";
 
-export function createPool(dbConfig) {
+type DatabaseConfig = (typeof import("./config.js").config)["db"];
+
+export function createPool(dbConfig: DatabaseConfig) {
   return mysql.createPool({
     host: dbConfig.host,
     port: dbConfig.port,
@@ -19,7 +22,7 @@ export function createPool(dbConfig) {
 }
 
 /** 启动时等 MySQL 就绪（容器编排里 depends_on 已保证，这里再加一层兜底）。 */
-export async function waitForDatabase(pool, { attempts = 30, delayMs = 1000, log = console } = {}) {
+export async function waitForDatabase(pool: Pool, { attempts = 30, delayMs = 1000, log = console } = {}) {
   let lastError = null;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -33,7 +36,8 @@ export async function waitForDatabase(pool, { attempts = 30, delayMs = 1000, log
     } catch (error) {
       lastError = error;
       if (attempt === 1 || attempt % 5 === 0) {
-        log.warn(`[db] 等待数据库就绪（第 ${attempt}/${attempts} 次）：${error.code || error.message}`);
+        const detail = error as NodeJS.ErrnoException;
+        log.warn(`[db] 等待数据库就绪（第 ${attempt}/${attempts} 次）：${detail.code || detail.message}`);
       }
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }

@@ -1,6 +1,6 @@
 # Bookeeper
 
-泵车 / 搅拌车 记账与看板。Node.js + MySQL，单页前端，无构建步骤，运行时只依赖 `mysql2`。
+泵车 / 搅拌车记账与看板。前后端使用 TypeScript，服务端基于 Node.js + MySQL，运行时只依赖 `mysql2`。
 
 线上地址：<https://bookeeper.lollipopzzz.cn>
 
@@ -48,13 +48,21 @@ docker network create web   # 首次
 docker compose up -d --build
 ```
 
-打开 <http://localhost:3000>。也可以不用 Docker，改 `.env` 里的 `DB_HOST` 指向本机 MySQL 后 `npm install && npm start`。
-
-测试：
+打开 <http://localhost:3000>。也可以使用 Node.js 20 或更新版本直接运行。将 `.env` 中的数据库配置指向本机 MySQL，然后执行以下命令。
 
 ```bash
-npm test        # 公式引擎 + API 端到端（内存 store，不需要数据库）
+npm ci
+npm run build
+npm start
 ```
+
+```bash
+npm run dev        # 监听 TypeScript 变更，编译成功后重启服务
+npm run typecheck  # 检查前后端和测试的类型
+npm test          # 编译并运行测试，API 测试使用内存存储
+```
+
+构建产物在 `dist/`，包括浏览器脚本、静态资源和数据库建表语句。开发时修改 HTML、CSS 或建表语句后，可以运行 `npm run copy:assets` 同步这些文件。Docker 镜像在构建阶段完成编译。
 
 ## 环境变量
 
@@ -94,7 +102,8 @@ APP_PASSWORD=...
 
 ```
 src/server/    HTTP 服务、公式引擎、数据访问、鉴权
-src/public/    单页前端（index.html / app.js / styles.css）
+src/public/    单页前端（index.html / app.ts / styles.css）
+src/shared/    前后端共用的账目与 API 类型
 db/schema.sql  建表语句（幂等，启动时自动执行）
 scripts/       deploy.sh
 tests/         公式与 API 测试

@@ -1,3 +1,5 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { TLSSocket } from "node:tls";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,13 +25,18 @@ import { buildPriceIndex } from "./prices.js";
 import { lunarYearInfo } from "./lunar.js";
 import { sortRecords } from "./order.js";
 import { DEFAULT_OCR_MODEL, recognizeLedger } from "./ocr.js";
-import { DICT_KINDS, formatDate, isScope, SCOPE_KEYS, SCOPES, scopeDef, toFormulaValues } from "./scopes.js";
+import { DICT_KINDS, formatDate, isDictKind, isScope, SCOPE_KEYS, SCOPES, scopeDef, toFormulaValues } from "./scopes.js";
+import type {
+  DashboardData, DecoratedRecord, DictPatch, EvaluationData, Formulas, GroupBy, GroupTotals, LedgerRecord,
+  MetaData, OcrResult, RecordFilters, RecordInput, SessionData,
+} from "../shared/types.js";
+import type { LedgerStore } from "./ledger-store.js";
 import { DEFAULT_FORMULAS } from "./seed.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(join(here, "..", "public"));
 
-const MIME = {
+const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -43,7 +50,10 @@ const MIME = {
 const BODY_LIMIT = 256 * 1024;
 
 export class HttpError extends Error {
-  constructor(status, message, code = "") {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, message: string, code = "") {
     super(message);
     this.name = "HttpError";
     this.status = status;
@@ -51,17 +61,41 @@ export class HttpError extends Error {
   }
 }
 
-export function createApp({ store, config, logger = console }) {
+type AppConfig = Pick<typeof import("./config.js").config, "appPassword" | "sessionSecret" | "sessionTtlMs" | "timeZone"> & {
+  dashscope?: (typeof import("./config.js").config)["dashscope"];
+};
+
+type Logger = Pick<Console, "error">;
+
+interface AppOptions {
+  store: LedgerStore;
+  config: AppConfig;
+  logger?: Logger;
+}
+
+interface ApiOptions {
+  request: IncomingMessage;
+  response: ServerResponse;
+  url: URL;
+  path: string;
+  method: string;
+  store: LedgerStore;
+  config: AppConfig;
+  logger: Logger;
+  limiter: ReturnType<typeof createLoginLimiter>;
+}
+
+export function createApp({ store, config, logger = console }: AppOptions) {
   const limiter = createLoginLimiter();
 
-  return async function handle(request, response) {
+  return async function handle(request: IncomingMessage, response: ServerResponse) {
     const url = new URL(request.url || "/", "http://localhost");
     const method = (request.method || "GET").toUpperCase();
 
     try {
       const path = decodeURIComponent(url.pathname);
       if (!path.startsWith("/api/")) {
-        await serveStatic(request, response, path, method);
+        await serveStatic(response, path, method);
         return;
       }
 
@@ -81,7 +115,7 @@ export function createApp({ store, config, logger = console }) {
   };
 }
 
-async function handleApi({ request, response, url, path, method, store, config, logger, limiter }) {
+async function handleApi({ request, response, url, path, method, store, config, logger, limiter }: ApiOptions) {
   // ---------- 公开接口 ----------
   if (method === "GET" && path === "/api/health") {
     const dbOk = await store.ping().catch(() => false);
@@ -96,7 +130,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
 
   if (method === "GET" && path === "/api/session") {
     const authenticated = isAuthenticated(request, config);
-    json(response, 200, { ok: true, data: { authenticated, passwordRequired: Boolean(config.appPassword) } });
+    json(response, 200, { ok: true, data: { authenticated, passwordRequired: Boolean(config.appPassword) } satisfies SessionData });
     return;
   }
 
@@ -137,7 +171,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
       store.getFormulas(),
       store.listPrices(),
     ]);
-    const grouped = { customer: [], truck_model: [] };
+    const grouped: MetaData["dicts"] = { customer: [], truck_model: [] };
     for (const item of dicts) {
       if (grouped[item.kind]) {
         grouped[item.kind].push({ id: item.id, label: item.label, scope: item.scope, sort_order: item.sort_order });
@@ -170,7 +204,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
         today,
         lunar: lunarYearInfo(today),
         ocr: { enabled: Boolean(config.dashscope?.apiKey), model: config.dashscope?.model || DEFAULT_OCR_MODEL },
-      },
+      } satisfies MetaData,
     });
     return;
   }
@@ -220,7 +254,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
     if (bytes.length > 6 * 1024 * 1024) throw new HttpError(413, "图片过大（上限 6MB），请压缩后重试");
 
     const dicts = await store.listDicts();
-    let result;
+    let result: OcrResult;
     try {
       result = await recognizeLedger({
         apiKey: config.dashscope.apiKey,
@@ -234,8 +268,9 @@ async function handleApi({ request, response, url, path, method, store, config, 
         timeoutMs: config.dashscope.timeoutMs,
       });
     } catch (error) {
-      logger.error?.("[ocr] 识别失败", error?.message || error);
-      throw new HttpError(502, `识别失败：${error.message || error}`);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error?.("[ocr] 识别失败", message);
+      throw new HttpError(502, `识别失败：${message}`);
     }
 
     json(response, 200, { ok: true, data: { ...result, model: config.dashscope.model } });
@@ -247,6 +282,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
     const formulas = await store.getFormulas();
     const data = normalizeRecordInput(body, { ...DEFAULT_FORMULAS, ...formulas });
     const created = await store.createRecord(data);
+    if (!created) throw new Error("无法读取新增记录");
     const context = await loadContext(store, { scope: created.scope, limit: 1 });
     const decorated = decorate(created, context.formulas, context.priceIndex);
     json(response, 201, { ok: true, data: decorated });
@@ -266,6 +302,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
         ...formulas,
       });
       const updated = await store.updateRecord(id, data);
+      if (!updated) throw new HttpError(404, "记录不存在");
       const context = await loadContext(store, { scope: updated.scope, limit: 1 });
       json(response, 200, { ok: true, data: decorate(updated, context.formulas, context.priceIndex) });
       return;
@@ -307,7 +344,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
         values,
         unitPrice: price.price,
         priceMissing: price.missing,
-      },
+      } satisfies EvaluationData,
     });
     return;
   }
@@ -315,11 +352,11 @@ async function handleApi({ request, response, url, path, method, store, config, 
   if (method === "POST" && path === "/api/dicts") {
     const body = await readJson(request);
     const kind = String(body.kind || "");
-    if (!DICT_KINDS[kind]) throw new HttpError(400, "字典类型不正确");
+    if (!isDictKind(kind)) throw new HttpError(400, "字典类型不正确");
     const label = String(body.label ?? "").trim();
     if (!label) throw new HttpError(400, "名称不能为空");
     if (label.length > 64) throw new HttpError(400, "名称过长");
-    const item = await store.addDict({ kind, scope: body.scope || "both", label });
+    const item = await store.addDict({ kind, scope: String(body.scope || "both"), label });
     json(response, 201, { ok: true, data: item });
     return;
   }
@@ -335,7 +372,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
     }
     if (method === "PUT") {
       const body = await readJson(request);
-      const patch = {};
+      const patch: DictPatch = {};
       if (body.label !== undefined) {
         const label = String(body.label).trim();
         if (!label) throw new HttpError(400, "名称不能为空");
@@ -380,7 +417,6 @@ async function handleApi({ request, response, url, path, method, store, config, 
     if (!Number.isFinite(price) || price < 0) throw new HttpError(400, "单价必须是不小于 0 的数字");
     const saved = await store.savePrice({
       id: Number(priceMatch[1]),
-      scope: body.scope,
       customer_name: String(body.customer_name || "*").trim() || "*",
       truck_model: String(body.truck_model || "*").trim() || "*",
       price,
@@ -408,7 +444,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
       try {
         parseFormula(formula);
       } catch (error) {
-        throw new HttpError(400, `${name}语法错误：${error.message}`);
+        throw new HttpError(400, `${name}语法错误：${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -428,7 +464,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
 
 // ---------------------------------------------------------------- 静态文件
 
-async function serveStatic(request, response, path, method) {
+async function serveStatic(response: ServerResponse, path: string, method: string) {
   if (method !== "GET" && method !== "HEAD") {
     throw new HttpError(405, "不支持的请求方法");
   }
@@ -462,7 +498,7 @@ async function serveStatic(request, response, path, method) {
 
 // ---------------------------------------------------------------- 数据组装
 
-async function loadContext(store, filters) {
+async function loadContext(store: LedgerStore, filters: RecordFilters) {
   const [formulas, prices, records] = await Promise.all([
     store.getFormulas(),
     store.listPrices(),
@@ -478,7 +514,7 @@ async function loadContext(store, filters) {
   };
 }
 
-export function decorate(record, formulas, priceIndex) {
+export function decorate(record: LedgerRecord, formulas: Formulas, priceIndex: ReturnType<typeof buildPriceIndex>): DecoratedRecord {
   const scope = isScope(record.scope) ? record.scope : "pump";
   const formula = formulas[scope] || DEFAULT_FORMULAS[scope];
   const values = toFormulaValues(scope, record);
@@ -512,12 +548,15 @@ export function decorate(record, formulas, priceIndex) {
   };
 }
 
-export function buildDashboard(rows, context) {
+export function buildDashboard(
+  rows: DecoratedRecord[],
+  context: Pick<Awaited<ReturnType<typeof loadContext>>, "formulas" | "priceIndex">,
+): DashboardData {
   const kpi = {
     count: rows.length,
     volume: 0,
     amount: 0,
-    customers: new Set(),
+    customers: new Set<string>(),
     missingPrices: 0,
     amountErrors: 0,
   };
@@ -586,8 +625,8 @@ export function buildDashboard(rows, context) {
   };
 }
 
-function groupRows(rows, keyFn, order) {
-  const groups = new Map();
+function groupRows(rows: DecoratedRecord[], keyFn: (row: DecoratedRecord) => string, order: GroupBy) {
+  const groups = new Map<string, GroupTotals>();
   for (const row of rows) {
     const key = keyFn(row);
     const current = groups.get(key) || { key, count: 0, volume: 0, amount: 0 };
@@ -607,12 +646,13 @@ function groupRows(rows, keyFn, order) {
 
 // ---------------------------------------------------------------- 输入处理
 
-export function normalizeRecordInput(body, formulas) {
+export function normalizeRecordInput(body: Record<string, unknown>, formulas: Formulas): RecordInput {
   const scope = String(body.scope ?? "");
   if (!isScope(scope)) throw new HttpError(400, "表类型不正确");
 
-  const data = {
+  const data: RecordInput = {
     scope,
+    volume: 0,
     entry_date: String(body.entry_date ?? "").trim(),
     truck_model: String(body.truck_model ?? "").trim().slice(0, 64),
     customer_name: String(body.customer_name ?? "").trim().slice(0, 128),
@@ -661,7 +701,7 @@ export function normalizeRecordInput(body, formulas) {
   return data;
 }
 
-function readFilters(url) {
+function readFilters(url: URL): RecordFilters {
   const params = url.searchParams;
   const scope = params.get("scope");
   return {
@@ -675,7 +715,7 @@ function readFilters(url) {
   };
 }
 
-function buildCsv(rows) {
+function buildCsv(rows: DecoratedRecord[]) {
   const header = ["表", "日期", "车型", "客户名称", "方量", "单价", "金额", "备注", "计价方式"];
   const lines = [header.join(",")];
   for (const row of rows) {
@@ -698,7 +738,7 @@ function buildCsv(rows) {
   return lines.join("\r\n");
 }
 
-function csvCell(value) {
+function csvCell(value: unknown) {
   const text = value === null || value === undefined ? "" : String(value);
   if (/[",\r\n]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
   return text;
@@ -706,18 +746,18 @@ function csvCell(value) {
 
 // ---------------------------------------------------------------- 基础设施
 
-function isAuthenticated(request, config) {
+function isAuthenticated(request: IncomingMessage, config: AppConfig) {
   if (!config.appPassword) return true;
   const cookies = parseCookies(request.headers.cookie);
   return verifySession(config.sessionSecret, cookies[SESSION_COOKIE]);
 }
 
-function isSecure(request) {
+function isSecure(request: IncomingMessage) {
   const proto = String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-  return proto === "https" || Boolean(request.socket?.encrypted);
+  return proto === "https" || Boolean((request.socket as TLSSocket)?.encrypted);
 }
 
-function clientKey(request) {
+function clientKey(request: IncomingMessage) {
   return (
     String(request.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
     request.socket?.remoteAddress ||
@@ -725,8 +765,8 @@ function clientKey(request) {
   );
 }
 
-async function readJson(request, limit = BODY_LIMIT) {
-  const chunks = [];
+async function readJson(request: IncomingMessage, limit = BODY_LIMIT): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
   let size = 0;
 
   for await (const chunk of request) {
@@ -745,7 +785,7 @@ async function readJson(request, limit = BODY_LIMIT) {
   }
 }
 
-function json(response, status, payload) {
+function json(response: ServerResponse, status: number, payload: unknown) {
   const body = JSON.stringify(payload);
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -756,18 +796,18 @@ function json(response, status, payload) {
   response.end(body);
 }
 
-function dateOnly(value) {
+function dateOnly(value: string | null) {
   const text = String(value || "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
 }
 
-function clampDecimals(value) {
+function clampDecimals(value: unknown) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 2;
   return Math.min(Math.max(Math.trunc(number), 0), 4);
 }
 
-export function todayInZone(timeZone) {
+export function todayInZone(timeZone: string) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -776,10 +816,10 @@ export function todayInZone(timeZone) {
   }).format(new Date());
 }
 
-function round2(value) {
+function round2(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function round3(value) {
+function round3(value: number) {
   return Math.round((value + Number.EPSILON) * 1000) / 1000;
 }

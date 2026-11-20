@@ -24,10 +24,10 @@ test("干支与生肖按农历年推算", () => {
     zodiac: "马",
     label: "农历丙午年",
   });
-  assert.equal(lunarYearInfo("2025-03-01").ganzhi, "乙巳");
-  assert.equal(lunarYearInfo("2025-03-01").zodiac, "蛇");
-  assert.equal(lunarYearInfo("2024-05-01").ganzhi, "甲辰");
-  assert.equal(lunarYearInfo("2024-05-01").zodiac, "龙");
+  assert.equal(lunarYearInfo("2025-03-01")?.ganzhi, "乙巳");
+  assert.equal(lunarYearInfo("2025-03-01")?.zodiac, "蛇");
+  assert.equal(lunarYearInfo("2024-05-01")?.ganzhi, "甲辰");
+  assert.equal(lunarYearInfo("2024-05-01")?.zodiac, "龙");
 });
 
 test("非法输入返回 null", () => {

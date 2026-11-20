@@ -27,7 +27,7 @@ async function main() {
     }
   });
 
-  const shutdown = async (signal) => {
+  const shutdown = async (signal: NodeJS.Signals) => {
     log.info(`[boot] 收到 ${signal}，正在关闭…`);
     server.close(() => log.info("[boot] HTTP 已关闭"));
     await pool.end().catch(() => {});

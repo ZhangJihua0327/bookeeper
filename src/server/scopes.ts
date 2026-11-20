@@ -3,7 +3,9 @@
  * 公式变量的名字就是这里的中文 label，与用户在表格里看到的列名一致。
  */
 
-export const SCOPES = {
+import type { DictKind, FormulaValues, MetaData, RecordField, Scope, ScopeDefinition } from "../shared/types.js";
+
+export const SCOPES: Record<Scope, ScopeDefinition> = {
   pump: {
     key: "pump",
     label: "泵车",
@@ -30,24 +32,28 @@ export const SCOPES = {
   },
 };
 
-export const SCOPE_KEYS = Object.keys(SCOPES);
+export const SCOPE_KEYS = Object.keys(SCOPES) as Scope[];
 
-export const DICT_KINDS = {
+export const DICT_KINDS: MetaData["dictKinds"] = {
   customer: { label: "客户名称", scopes: ["pump", "mixer"] },
   truck_model: { label: "车型", scopes: ["pump", "mixer"] },
 };
 
-export function isScope(value) {
+export function isDictKind(value: string): value is DictKind {
+  return Object.prototype.hasOwnProperty.call(DICT_KINDS, value);
+}
+
+export function isScope(value: string): value is Scope {
   return Object.prototype.hasOwnProperty.call(SCOPES, value);
 }
 
-export function scopeDef(scope) {
+export function scopeDef(scope: Scope) {
   return SCOPES[scope] || SCOPES.pump;
 }
 
 /** 把一条数据库记录转成“列名 → 值”，供公式引擎使用。 */
-export function toFormulaValues(scope, row) {
-  const values = {};
+export function toFormulaValues(scope: Scope, row: Record<RecordField, unknown>): FormulaValues {
+  const values: FormulaValues = {};
   for (const field of scopeDef(scope).fields) {
     const raw = row[field.key];
     if (field.type === "number") {
@@ -61,7 +67,7 @@ export function toFormulaValues(scope, row) {
   return values;
 }
 
-export function formatDate(value) {
+export function formatDate(value: unknown) {
   if (!value) return "";
   if (value instanceof Date) {
     const year = value.getFullYear();

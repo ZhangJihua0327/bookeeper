@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { FormulaValues, PriceLookup } from "../src/shared/types.js";
 import {
   computeAmount,
   evaluateRemarkExpression,
@@ -18,7 +19,7 @@ const priceIndex = buildPriceIndex([
   { scope: "pump", customer_name: "*", truck_model: "*", price: 20 },
 ]);
 
-const priceLookup = (customer, model) => priceIndex.resolve("pump", customer, model);
+const priceLookup: PriceLookup = (customer, model) => priceIndex.resolve("pump", customer, model);
 
 const values = {
   日期: "2026-11-15",
@@ -136,7 +137,7 @@ test("数字字符串参与运算", () => {
 
 test("业务默认公式：泵车起步价 800、蒲发 9/1 起 600、搅拌车 30 元/方", () => {
   const noPrice = () => ({ price: 0, missing: false });
-  const pump = (row) => computeAmount(DEFAULT_FORMULAS.pump.amount_formula, row, noPrice).amount;
+  const pump = (row: FormulaValues) => computeAmount(DEFAULT_FORMULAS.pump.amount_formula, row, noPrice).amount;
 
   assert.equal(pump({ 方量: 8, 客户名称: "朱水波", 日期: "2026-11-15" }), 800, "8 方按起步价 800");
   assert.equal(pump({ 方量: 50, 客户名称: "朱水波", 日期: "2026-11-15" }), 1000, "50 方按 20 元/方");

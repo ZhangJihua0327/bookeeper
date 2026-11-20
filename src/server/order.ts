@@ -6,15 +6,15 @@
  * 没填车型的（搅拌车不记车号）排在当天最后。
  */
 
-const CN_DIGITS = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+const CN_DIGITS: Record<string, number | undefined> = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 
-function compareLiteral(a, b) {
+function compareLiteral(a: string, b: string) {
   if (a === b) return 0;
   return a < b ? -1 : 1;
 }
 
 /** 「一」→1、「十」→10、「十二」→12、「二十」→20、「二十三」→23；认不出返回 null */
-export function chineseNumeralToNumber(text) {
+export function chineseNumeralToNumber(text: unknown) {
   const value = String(text ?? "");
   if (!value) return null;
 
@@ -43,17 +43,17 @@ export function chineseNumeralToNumber(text) {
 }
 
 /** 车型开头的车号：「一号」→1、「十二号」→12、「2号」→2；「外借李正」→null */
-export function truckModelNumber(model) {
+export function truckModelNumber(model: unknown) {
   const text = String(model ?? "").trim();
   const match = /^(\d+|[零一二两三四五六七八九十百]+)/.exec(text);
   if (!match) return null;
 
   const token = match[1];
   const value = /^\d+$/.test(token) ? Number(token) : chineseNumeralToNumber(token);
-  return Number.isFinite(value) && value > 0 ? value : null;
+  return value !== null && Number.isFinite(value) && value > 0 ? value : null;
 }
 
-export function compareTruckModels(a, b) {
+export function compareTruckModels(a: unknown, b: unknown) {
   const numberA = truckModelNumber(a);
   const numberB = truckModelNumber(b);
 
@@ -66,7 +66,9 @@ export function compareTruckModels(a, b) {
   return compareLiteral(String(a), String(b));
 }
 
-export function compareRecords(a, b) {
+type SortableRecord = { entry_date?: unknown; truck_model?: unknown; id?: unknown };
+
+export function compareRecords(a: SortableRecord, b: SortableRecord) {
   const dateA = String(a.entry_date || "");
   const dateB = String(b.entry_date || "");
   if (dateA !== dateB) return compareLiteral(dateB, dateA);
@@ -86,6 +88,6 @@ export function compareRecords(a, b) {
   return (Number(b.id) || 0) - (Number(a.id) || 0);
 }
 
-export function sortRecords(rows) {
+export function sortRecords<T extends SortableRecord>(rows: readonly T[]) {
   return [...rows].sort(compareRecords);
 }
