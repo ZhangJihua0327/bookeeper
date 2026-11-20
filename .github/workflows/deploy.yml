@@ -61,17 +61,21 @@ jobs:
       - name: Verify public API
         run: |
           set -eu
+          # /api/health 是公开探针；页面应能打开；其余接口要求登录，未带 cookie 应为 401
           attempt=1
           while [ "$attempt" -le 5 ]; do
-            if curl --fail --silent --show-error --max-time 15 \
-              https://bookeeper.lollipopzzz.cn/api/options >/dev/null; then
-              echo "Public /api/options probe succeeded on attempt $attempt"
+            health=$(curl --silent --show-error --max-time 15 -o /dev/null -w '%{http_code}' https://bookeeper.lollipopzzz.cn/api/health || true)
+            index=$(curl --silent --show-error --max-time 15 -o /dev/null -w '%{http_code}' https://bookeeper.lollipopzzz.cn/ || true)
+            protected=$(curl --silent --show-error --max-time 15 -o /dev/null -w '%{http_code}' https://bookeeper.lollipopzzz.cn/api/meta || true)
+            if [ "$health" = "200" ] && [ "$index" = "200" ] && [ "$protected" = "401" ]; then
+              echo "public probe ok: health=$health index=$index protected=$protected (attempt $attempt)"
               exit 0
             fi
-            sleep 2
+            echo "attempt $attempt: health=$health index=$index protected=$protected"
+            sleep 3
             attempt=$((attempt + 1))
           done
-          echo "Public /api/options probe failed after 5 attempts" >&2
+          echo "Public probe failed after 5 attempts" >&2
           exit 1
 
       - name: Collect deployment diagnostics
