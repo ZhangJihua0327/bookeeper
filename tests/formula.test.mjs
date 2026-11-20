@@ -66,6 +66,12 @@ test("备注支持“驾驶员：算式”多行", () => {
   assert.equal(result.error, "");
 });
 
+test("备注里带司机姓氏也能算（12×2 姜）", () => {
+  assert.equal(evaluateRemarkExpression("12×2 姜").value, 24);
+  assert.equal(evaluateRemarkExpression("12×2\n10×2 王").value, 44);
+  assert.equal(evaluateRemarkExpression("8+3 子姜").value, 11);
+});
+
 test("备注为空或非法时给出错误", () => {
   assert.ok(evaluateRemarkExpression("").error);
   assert.ok(evaluateRemarkExpression("今天休息").error);

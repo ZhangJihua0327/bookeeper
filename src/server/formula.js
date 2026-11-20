@@ -452,7 +452,12 @@ export function evaluateRemarkExpression(raw) {
       .replace(/([0-9)）])\s+(?=[0-9(（])/g, "$1+")
       .replace(/\s+/g, "");
 
-    const result = evaluateArithmetic(normalized);
+    let result = evaluateArithmetic(normalized);
+    if (result === null) {
+      // 台账常写成「12×2 姜」这种带司机姓氏的形式，去掉中文再算一次
+      const stripped = normalized.replace(/[\u4e00-\u9fa5]+/g, "");
+      if (stripped && stripped !== normalized) result = evaluateArithmetic(stripped);
+    }
     if (result === null) return { value: 0, error: `无法识别的方量算式“${segment}”` };
     total += result;
     used += 1;

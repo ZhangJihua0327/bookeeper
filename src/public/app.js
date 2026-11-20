@@ -1,18 +1,26 @@
 /* Bookeeper 前端：原生 ESM，无构建步骤、无第三方依赖 */
 
+const TABS = ["board", "entry", "config"];
+
 const state = {
   meta: null,
-  tab: "entry",
-  scope: "pump",
-  editingId: null,
+  tab: "board",
   filters: { scope: "all", from: "", to: "", customer: "", model: "", q: "", quick: "month" },
   dashboard: null,
   boardInitialized: false,
   page: 1,
   pageSize: 20,
   groupBy: "customer",
-  entryMode: "manual",
-  photo: { dataUrl: "", date: "", drafts: [] },
+  chartMetric: "volume",
+  recent: [],
+  entry: {
+    date: "",
+    scope: "pump",
+    editingId: null,
+    rows: [],
+    photo: { dataUrl: "", status: "", busy: false },
+  },
+  preview: {},
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -78,6 +86,10 @@ function toast(message, isError = false) {
   toastTimer = setTimeout(() => node.classList.remove("is-visible"), 2600);
 }
 
+function scopeDef(key) {
+  return state.meta?.scopes.find((scope) => scope.key === key) || state.meta?.scopes[0] || { key, label: key, fields: [] };
+}
+
 /* ---------------------------------------------------------------- 登录 */
 
 function showLogin() {
@@ -127,38 +139,71 @@ async function boot() {
 
 async function afterLogin() {
   state.meta = await api("/api/meta");
+  state.entry.date = state.meta.today;
   showApp();
   $("#today-label").textContent = state.meta.today;
-  switchTab("entry");
+  switchTab(tabFromHash());
 }
 
 /* ---------------------------------------------------------------- 标签页 */
+
+function tabFromHash() {
+  const key = location.hash.replace(/^#/, "");
+  return TABS.includes(key) ? key : "board";
+}
+
+window.addEventListener("hashchange", () => {
+  const tab = tabFromHash();
+  if (tab !== state.tab) switchTab(tab, { syncHash: false });
+});
 
 $("#tabs").addEventListener("click", (event) => {
   const tab = event.target.closest(".tab")?.dataset.tab;
   if (tab) switchTab(tab);
 });
 
-function switchTab(tab) {
+function switchTab(tab, { syncHash = true } = {}) {
+  if (!TABS.includes(tab)) tab = "board";
   state.tab = tab;
+
   $$(".tab").forEach((node) => node.classList.toggle("is-active", node.dataset.tab === tab));
-  $("#view-entry").classList.toggle("hidden", tab !== "entry");
-  $("#view-board").classList.toggle("hidden", tab !== "board");
-  $("#view-config").classList.toggle("hidden", tab !== "config");
+  for (const key of TABS) $(`#view-${key}`)?.classList.toggle("hidden", key !== tab);
 
-  if (tab !== "board") {
-    document.body.classList.remove("health-bad", "health-warn");
-  }
+  if (syncHash && location.hash !== `#${tab}`) history.pushState(null, "", `#${tab}`);
+  if (tab !== "board") document.body.classList.remove("health-bad", "health-warn");
 
-  if (tab === "entry") renderEntry();
   if (tab === "board") renderBoard();
+  if (tab === "entry") renderEntry();
   if (tab === "config") renderConfig();
 }
 
 /* ---------------------------------------------------------------- 录入页 */
 
-function currentScope() {
-  return state.meta.scopes.find((scope) => scope.key === state.scope) || state.meta.scopes[0];
+let rowSeq = 0;
+
+function makeRow(patch = {}) {
+  return {
+    uid: `r${++rowSeq}`,
+    id: null,
+    scope: state.entry.scope,
+    customer_name: "",
+    truck_model: "",
+    volume: "",
+    remark: "",
+    amount_override: "",
+    auto: null,
+    autoError: "",
+    autoVolume: null,
+    confidence: null,
+    uncertain: [],
+    raw: "",
+    fromOcr: false,
+    ...patch,
+  };
+}
+
+function rowIsEmpty(row) {
+  return !row.id && !row.customer_name.trim() && String(row.volume).trim() === "" && !row.remark.trim();
 }
 
 function datalistsHtml() {
@@ -172,62 +217,62 @@ function datalistsHtml() {
     .join("");
 }
 
-function fieldHtml(field) {
-  const id = `f-${field.key}`;
-  const required = field.required ? '<i class="req">*</i>' : "";
-  let control = "";
-
-  if (field.type === "date") {
-    control = `<input id="${id}" data-field="${field.key}" type="date" value="${esc(state.meta.today)}" />`;
-  } else if (field.type === "number") {
-    control = `<input id="${id}" data-field="${field.key}" type="number" step="0.01" min="0" placeholder="${esc(
-      field.placeholder || "0",
-    )}" />`;
-  } else if (field.type === "dict") {
-    control = `<input id="${id}" data-field="${field.key}" type="text" list="dl-${field.dict}" placeholder="选择或直接输入" />`;
-  } else {
-    control = `<input id="${id}" data-field="${field.key}" type="text" placeholder="${esc(field.placeholder || "")}" />`;
-  }
-
-  const wide = field.key === "remark" ? "span-2" : "";
-  const hint = field.hint ? `<span class="hint">${esc(field.hint)}</span>` : "";
-  return `<label class="field ${wide}"><span>${esc(field.label)}${required}</span>${control}${hint}</label>`;
-}
-
 function renderEntry() {
-  const scope = currentScope();
-  const mode = state.entryMode;
-  const editing = state.editingId
-    ? `<span class="badge badge-warn">正在编辑 #${state.editingId}</span>`
-    : "";
+  if (!state.entry.rows.length) state.entry.rows = [makeRow()];
+
+  const editing = state.entry.editingId;
+  const scope = scopeDef(state.entry.scope);
 
   $("#view-entry").innerHTML = `
     <div class="stack">
       <div class="card">
         <div class="card-head">
           <div>
-            <h2 class="card-title">${mode === "photo" ? "拍照识别" : `填写${esc(scope.tableName)}`}</h2>
+            <h2 class="card-title">${editing ? `编辑记录 #${editing}` : "录入"}</h2>
             <p class="card-desc">${
-              mode === "photo"
-                ? "上传手写台账照片，AI 识别成草稿，核对后再入库——识别结果不会直接写库。"
-                : "日期、客户、方量为必填；金额按「配置 → 金额公式」实时计算。"
+              editing
+                ? "改完点右下角保存；想放弃就点“取消编辑”。"
+                : "手工填写，或者拍照 / 粘贴一张台账让 AI 先填好——都在同一张表里，核对后一起入库。"
             }</p>
           </div>
           <div class="spacer"></div>
-          <div class="segmented" id="entry-mode">
-            <button type="button" data-mode="manual" class="${mode === "manual" ? "is-active" : ""}">手工录入</button>
-            <button type="button" data-mode="photo" class="${mode === "photo" ? "is-active" : ""}">拍照识别</button>
+          <div class="entry-tools">
+            <div class="segmented" id="scope-switch">
+              ${state.meta.scopes
+                .map(
+                  (item) =>
+                    `<button type="button" data-scope="${item.key}" class="${
+                      item.key === state.entry.scope ? "is-active" : ""
+                    }">${esc(item.label)}</button>`,
+                )
+                .join("")}
+            </div>
+            <label class="date-pill">
+              <span>日期</span>
+              <input type="date" id="entry-date" value="${esc(state.entry.date || state.meta.today)}" />
+            </label>
           </div>
         </div>
 
-        ${mode === "photo" ? photoPanelHtml() : manualPanelHtml(scope, editing)}
+        ${photoStripHtml()}
+
+        <div id="rows-wrap"></div>
+
+        <div class="entry-foot">
+          <button class="btn btn-sm" type="button" id="add-row">＋ 添加一行</button>
+          ${editing ? '<button class="btn btn-sm" type="button" id="cancel-edit">取消编辑</button>' : ""}
+          <span class="spacer"></span>
+          <span class="totals" id="entry-totals"></span>
+          <button class="btn btn-sm btn-ghost" type="button" id="clear-rows">清空</button>
+          <button class="btn btn-primary" type="button" id="save-rows">${editing ? "保存修改" : "保存"}</button>
+        </div>
       </div>
 
       <div class="card card-tight">
         <div class="card-head">
           <div>
             <h2 class="card-title">最近记录</h2>
-            <p class="card-desc">${esc(scope.tableName)}最近 20 条，点“编辑”可载入上方表单修改</p>
+            <p class="card-desc">${esc(scope.label)}最近 10 条，点“编辑”会载入上面的表格</p>
           </div>
           <div class="spacer"></div>
           <button class="btn btn-sm" type="button" id="refresh-recent">刷新</button>
@@ -238,242 +283,259 @@ function renderEntry() {
     ${datalistsHtml()}
   `;
 
-  bindEntryEvents();
-  bindPhotoEvents();
-
-  if (mode === "photo") {
-    renderPhotoPreview();
-    renderDrafts();
-  } else {
-    updateLive();
-  }
+  renderRows();
+  scheduleAmounts(0);
   refreshRecent();
 }
 
-function manualPanelHtml(scope, editing) {
+function photoStripHtml() {
+  const photo = state.entry.photo;
+  const ocr = state.meta.ocr || {};
+
   return `
-    <div class="segmented" id="scope-switch" style="margin-bottom:14px">
-      ${state.meta.scopes
-        .map(
-          (item) =>
-            `<button type="button" data-scope="${item.key}" class="${
-              item.key === state.scope ? "is-active" : ""
-            }">${esc(item.tableName)}</button>`,
-        )
-        .join("")}
+    <div class="photo-strip ${photo.dataUrl ? "has-image" : ""}" id="photo-strip" ${photo.busy ? 'aria-busy="true"' : ""}>
+      <input type="file" id="photo-file" accept="image/*" capture="environment" hidden />
+      ${
+        photo.dataUrl
+          ? `<img class="photo-thumb" src="${photo.dataUrl}" alt="台账照片" />`
+          : `<span class="photo-mark">＋</span>`
+      }
+      <div class="photo-text">
+        <b>${photo.dataUrl ? "图片已就绪" : "拍照 / 粘贴台账"}</b>
+        <span class="hint">${
+          photo.dataUrl
+            ? "点「开始识别」，识别结果会填进下面的表格"
+            : "点这里选照片，也可以直接 Ctrl+V 粘贴截图，或把图片拖进来"
+        }</span>
+      </div>
+      <div class="photo-actions">
+        ${
+          photo.dataUrl
+            ? `<button class="btn btn-sm btn-primary" type="button" data-photo-action="run" ${
+                ocr.enabled && !photo.busy ? "" : "disabled"
+              }>${photo.busy ? "识别中…" : "开始识别"}</button>
+               <button class="btn btn-sm" type="button" data-photo-action="clear">移除</button>`
+            : `<button class="btn btn-sm" type="button" data-photo-action="pick">选择照片</button>
+               <span class="badge">${esc(ocr.model || "qwen3-vl-plus")}</span>`
+        }
+      </div>
+      <span class="photo-status" id="photo-status">${esc(photo.status)}</span>
     </div>
-
-    <form id="entry-form" autocomplete="off">
-      <div class="form-grid">
-        ${scope.fields.map((field) => fieldHtml(field)).join("")}
-        ${fieldHtml({
-          key: "amount_override",
-          label: "金额（选填）",
-          type: "number",
-          required: false,
-          placeholder: "留空自动算",
-          hint: "留空按公式计算，填写则以此为准",
-        })}
-      </div>
-
-      <div class="live-bar" id="live-bar">
-        <span class="live-item">方量 <span class="live-value" data-live="volume">—</span> 方</span>
-        <span class="live-item">单价 <span class="live-value" data-live="price">—</span> 元/方</span>
-        <span class="live-item">金额 <span class="live-value" data-live="amount">—</span> 元</span>
-        <span class="live-note" data-live="note"></span>
-      </div>
-
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit">${state.editingId ? "保存修改" : "保存记录"}</button>
-        <button class="btn" type="button" id="reset-btn">清空</button>
-        <span class="spacer"></span>
-        ${editing}
-        <span class="hint">时间：${esc(state.meta.today)}（Asia/Shanghai）</span>
-      </div>
-    </form>
+    ${
+      ocr.enabled
+        ? ""
+        : `<div class="notice" style="margin-top:10px"><div class="notice-body">
+             服务端没有配置 <code>DASHSCOPE_API_KEY</code>，拍照识别不可用；手工填写不受影响。
+           </div></div>`
+    }
   `;
 }
 
-function bindEntryEvents() {
-  $$("#entry-mode button").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (button.dataset.mode === state.entryMode) return;
-      state.entryMode = button.dataset.mode;
-      renderEntry();
-    });
-  });
+function rowHtml(row) {
+  const scope = scopeDef(row.scope);
+  const modelRequired = scope.fields.find((field) => field.key === "truck_model")?.required;
+  const flag =
+    row.confidence !== null && row.confidence !== undefined && row.confidence < 0.9
+      ? `<span class="row-flag" title="识别置信度 ${Math.round(row.confidence * 100)}%${
+          row.uncertain?.length ? `；不确定：${esc(row.uncertain.join("、"))}` : ""
+        }${row.raw ? `\n原文：${esc(row.raw)}` : ""}">?</span>`
+      : "";
 
-  $("#refresh-recent")?.addEventListener("click", refreshRecent);
-
-  const form = $("#entry-form");
-  if (!form) return;
-
-  $$("#scope-switch button").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (button.dataset.scope === state.scope) return;
-      state.scope = button.dataset.scope;
-      state.editingId = null;
-      renderEntry();
-    });
-  });
-
-  form.addEventListener("input", scheduleLive);
-  form.addEventListener("change", scheduleLive);
-  form.addEventListener("submit", submitEntry);
-  $("#reset-btn")?.addEventListener("click", () => {
-    state.editingId = null;
-    resetForm();
-    toast("已清空表单");
-  });
+  return `
+    <tr data-row="${row.uid}" class="${row.id ? "is-editing" : ""}">
+      <td data-label="表">
+        <select class="scope-select" data-uid="${row.uid}" data-field="scope">
+          ${state.meta.scopes
+            .map(
+              (item) =>
+                `<option value="${item.key}"${item.key === row.scope ? " selected" : ""}>${esc(item.label)}</option>`,
+            )
+            .join("")}
+        </select>
+      </td>
+      <td class="cell-customer" data-label="客户">
+        <input type="text" list="dl-customer" data-uid="${row.uid}" data-field="customer_name" value="${esc(
+          row.customer_name,
+        )}" placeholder="客户名称" />${flag}
+      </td>
+      <td data-label="车型">
+        <input type="text" list="dl-truck_model" data-uid="${row.uid}" data-field="truck_model" value="${esc(
+          row.truck_model,
+        )}" placeholder="${modelRequired ? "必填，如 二号" : "选填"}" class="${modelRequired ? "is-required" : ""}" />
+      </td>
+      <td class="num" data-label="方量">
+        <input class="num-input" type="number" step="0.001" min="0" data-uid="${row.uid}" data-field="volume" value="${esc(
+          row.volume,
+        )}" placeholder="0" />
+      </td>
+      <td data-label="备注">
+        <input type="text" data-uid="${row.uid}" data-field="remark" value="${esc(
+          String(row.remark).replace(/\r?\n/g, " / "),
+        )}" placeholder="${row.scope === "mixer" ? "算式或说明，如 12×3" : "选填"}" />
+      </td>
+      <td class="num" data-label="金额">
+        <div class="amount-cell">
+          <span class="amount-auto" data-auto="${row.uid}">—</span>
+          <input class="amount-manual" type="number" step="0.01" min="0" data-uid="${row.uid}" data-field="amount_override" value="${esc(
+            row.amount_override,
+          )}" placeholder="改写" title="留空按公式计算；填了就以此为准" />
+        </div>
+      </td>
+      <td class="num" data-label="">
+        <button class="btn btn-sm btn-ghost row-del" type="button" data-remove="${row.uid}" title="删除这一行">✕</button>
+      </td>
+    </tr>
+  `;
 }
 
-function readEntryForm() {
-  const scope = currentScope();
-  const data = { scope: scope.key };
-  for (const field of scope.fields) {
-    const input = $(`#f-${field.key}`);
-    const raw = input ? input.value : "";
-    if (field.type === "number") {
-      data[field.key] = raw.trim() === "" ? "" : raw;
-    } else {
-      data[field.key] = raw.trim();
+function renderRows() {
+  const wrap = $("#rows-wrap");
+  if (!wrap) return;
+
+  wrap.innerHTML = `
+    <div class="table-wrap entry-table-wrap stack-wrap">
+      <table class="table entry-table stack-mobile">
+        <colgroup>
+          <col style="width:96px" />
+          <col style="width:230px" />
+          <col style="width:150px" />
+          <col style="width:112px" />
+          <col />
+          <col style="width:134px" />
+          <col style="width:44px" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="col-scope">表</th>
+            <th>客户名称</th>
+            <th>车型</th>
+            <th class="num">方量</th>
+            <th>备注</th>
+            <th class="num">金额</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${state.entry.rows.map((row) => rowHtml(row)).join("")}</tbody>
+      </table>
+    </div>
+  `;
+
+  updateAmountCells();
+  updateTotals();
+}
+
+function findRow(uid) {
+  return state.entry.rows.find((row) => row.uid === uid);
+}
+
+function updateAmountCells() {
+  for (const row of state.entry.rows) {
+    const auto = $(`[data-auto="${row.uid}"]`);
+    if (auto) {
+      auto.textContent = row.autoError ? "公式错误" : row.auto === null ? "—" : fmt(row.auto);
+      auto.classList.toggle("is-error", Boolean(row.autoError));
+      if (row.autoError) auto.title = row.autoError;
+      else auto.removeAttribute("title");
+    }
+    const manual = $(`[data-field="amount_override"][data-uid="${row.uid}"]`);
+    if (manual) {
+      const filled = String(row.amount_override).trim() !== "";
+      manual.classList.toggle("is-manual", filled);
+      // 空行不展示“改写”输入，等填了内容再出现，避免界面噪音
+      manual.hidden = rowIsEmpty(row) && !filled;
     }
   }
-
-  const overrideInput = $("#f-amount_override");
-  data.amount_override = overrideInput ? overrideInput.value.trim() : "";
-  return data;
 }
 
-function resetForm() {
-  const scope = currentScope();
-  for (const field of scope.fields) {
-    const input = $(`#f-${field.key}`);
-    if (!input) continue;
-    input.value = field.type === "date" ? state.meta.today : "";
-    input.classList.remove("is-invalid");
+function updateTotals() {
+  const rows = state.entry.rows.filter((row) => !rowIsEmpty(row));
+  let volume = 0;
+  let amount = 0;
+  for (const row of rows) {
+    const raw = String(row.volume).trim();
+    const value = raw === "" ? Number(row.autoVolume) : Number(raw);
+    if (Number.isFinite(value)) volume += value;
+    const override = String(row.amount_override).trim();
+    const effective = override === "" ? row.auto : Number(override);
+    if (Number.isFinite(Number(effective))) amount += Number(effective);
   }
-  const amountInput = $("#f-amount_override");
-  if (amountInput) amountInput.value = "";
-  updateLive();
+
+  const node = $("#entry-totals");
+  if (node) {
+    node.innerHTML = rows.length
+      ? `合计 <b>${rows.length}</b> 条 · <b>${fmt(volume, 2)}</b> 方 · <b>${fmt(amount)}</b> 元`
+      : "";
+  }
+
+  const button = $("#save-rows");
+  if (button && !button.disabled) {
+    button.textContent = state.entry.editingId ? "保存修改" : rows.length > 1 ? `保存 ${rows.length} 条` : "保存";
+  }
 }
 
-let liveTimer = null;
-let liveToken = 0;
-let lastFormulaInput = null;
+let amountTimer = null;
+let amountToken = 0;
 
-function scheduleLive() {
-  clearTimeout(liveTimer);
-  liveTimer = setTimeout(updateLive, 240);
+function scheduleAmounts(delay = 320) {
+  clearTimeout(amountTimer);
+  amountTimer = setTimeout(() => void computeAmounts(), delay);
 }
 
-function setLive(name, text) {
-  const node = $(`[data-live="${name}"]`);
-  if (node) node.textContent = text;
-}
+async function computeAmounts() {
+  const token = ++amountToken;
 
-async function updateLive() {
-  const token = ++liveToken;
-  const row = readEntryForm();
-  const formulas = state.meta.formulas[state.scope];
+  for (const row of state.entry.rows) {
+    if (rowIsEmpty(row)) {
+      row.auto = null;
+      row.autoError = "";
+      row.autoVolume = null;
+      continue;
+    }
 
-  let volume = row.volume === "" ? null : Number(row.volume);
-  if (volume !== null && !Number.isFinite(volume)) volume = null;
+    const formula = state.meta.formulas[row.scope] || {};
+    const values = {
+      entry_date: state.entry.date || state.meta.today,
+      customer_name: row.customer_name,
+      truck_model: row.truck_model,
+      remark: row.remark,
+    };
 
-  let volumeNote = "";
-  let volumeError = "";
-
-  if (volume === null) {
     try {
+      let volume = String(row.volume).trim() === "" ? null : Number(row.volume);
+      if (!Number.isFinite(volume)) volume = null;
+
+      if (volume === null) {
+        const derived = await api("/api/evaluate", {
+          method: "POST",
+          body: { scope: row.scope, expression: formula.volume_formula, ...values },
+        });
+        if (token !== amountToken) return;
+        volume = derived.ok && Number(derived.value) > 0 ? Number(derived.value) : null;
+      }
+
       const result = await api("/api/evaluate", {
         method: "POST",
-        body: { scope: state.scope, expression: formulas.volume_formula, ...row },
+        body: { scope: row.scope, expression: formula.amount_formula, ...values, volume: volume ?? 0 },
       });
-      if (token !== liveToken) return;
-      if (result.ok && Number(result.value) > 0) {
-        volume = Number(result.value);
-        volumeNote = "方量由公式计算";
-      } else if (!result.ok) {
-        volumeError = result.error;
-      }
+      if (token !== amountToken) return;
+
+      row.autoVolume = volume;
+      row.auto = result.ok ? Number(result.value) : null;
+      row.autoError = result.ok ? "" : result.error;
     } catch (error) {
-      if (token !== liveToken) return;
-      volumeError = error.message;
+      if (token !== amountToken) return;
+      row.auto = null;
+      row.autoError = error.message;
     }
   }
 
-  let amount = null;
-  let price = null;
-  let priceMissing = false;
-  let amountError = "";
-
-  try {
-    const result = await api("/api/evaluate", {
-      method: "POST",
-      body: { scope: state.scope, expression: formulas.amount_formula, ...row, volume: volume ?? 0 },
-    });
-    if (token !== liveToken) return;
-    price = result.unitPrice;
-    priceMissing = result.priceMissing;
-    if (result.ok) amount = Number(result.value);
-    else amountError = result.error;
-  } catch (error) {
-    if (token !== liveToken) return;
-    amountError = error.message;
-  }
-
-  setLive("volume", volume === null ? "—" : fmt(volume, 3));
-  setLive("price", price === null ? "—" : fmt(price));
-
-  const overrideRaw = String(row.amount_override ?? "").trim();
-  const manual = overrideRaw === "" ? null : Number(overrideRaw);
-  const manualActive = manual !== null && Number.isFinite(manual) && manual >= 0;
-  const effective = manualActive ? manual : amount;
-  setLive("amount", effective === null ? "—" : fmt(effective));
-
-  const note = $('[data-live="note"]');
-  if (note) {
-    let text = "";
-    if (volumeError) text = `方量公式：${volumeError}`;
-    else if (amountError) text = `金额公式：${amountError}`;
-    else if (manualActive) text = `手动金额（公式值 ${amount === null ? "—" : fmt(amount)} 元）`;
-    else if (priceMissing) text = "未匹配到单价，请到配置页设置";
-    else if (volumeNote) text = volumeNote;
-    note.textContent = text;
-  }
-}
-
-async function submitEntry(event) {
-  event.preventDefault();
-  const row = readEntryForm();
-  const payload = { ...row };
-  if (payload.volume === "") delete payload.volume;
-  if (payload.amount_override === "") delete payload.amount_override;
-
-  const button = $('#entry-form button[type="submit"]');
-  button.disabled = true;
-
-  try {
-    if (state.editingId) {
-      await api(`/api/records/${state.editingId}`, { method: "PUT", body: payload });
-      toast("已更新记录");
-    } else {
-      await api("/api/records", { method: "POST", body: payload });
-      toast("已保存记录");
-    }
-    state.editingId = null;
-    await rememberDicts(row);
-    resetForm();
-    renderEntry();
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    button.disabled = false;
-  }
+  if (token !== amountToken) return;
+  updateAmountCells();
+  updateTotals();
 }
 
 async function rememberDicts(row) {
-  const scope = currentScope();
+  const scope = scopeDef(row.scope);
   for (const field of scope.fields) {
     if (field.type !== "dict") continue;
     const value = String(row[field.key] || "").trim();
@@ -490,38 +552,123 @@ async function rememberDicts(row) {
   }
 }
 
+async function saveRows() {
+  const rows = state.entry.rows.filter((row) => !rowIsEmpty(row));
+  if (!rows.length) {
+    toast("先填一行再保存", true);
+    return;
+  }
+
+  const button = $("#save-rows");
+  if (button) button.disabled = true;
+
+  const date = state.entry.date || state.meta.today;
+  let saved = 0;
+  const failed = [];
+
+  for (const row of rows) {
+    const payload = {
+      scope: row.scope,
+      entry_date: date,
+      customer_name: row.customer_name.trim(),
+      truck_model: row.truck_model.trim(),
+      remark: row.remark.trim(),
+    };
+    if (String(row.volume).trim() !== "") payload.volume = Number(row.volume);
+    if (String(row.amount_override).trim() !== "") payload.amount_override = Number(row.amount_override);
+
+    try {
+      if (row.id) await api(`/api/records/${row.id}`, { method: "PUT", body: payload });
+      else await api("/api/records", { method: "POST", body: payload });
+      saved += 1;
+      await rememberDicts(row);
+    } catch (error) {
+      failed.push({ row, error: error.message });
+    }
+  }
+
+  if (button) button.disabled = false;
+
+  if (failed.length) {
+    const position = state.entry.rows.findIndex((row) => row.uid === failed[0].row.uid) + 1;
+    toast(`${saved ? `已保存 ${saved} 条；` : ""}第 ${position} 行失败：${failed[0].error}`, true);
+    const keep = new Set(failed.map((item) => item.row.uid));
+    state.entry.rows = state.entry.rows.filter((row) => keep.has(row.uid));
+    state.entry.editingId = null;
+    renderRows();
+    scheduleAmounts(0);
+    if (saved) refreshRecent();
+    return;
+  }
+
+  toast(`已保存 ${saved} 条`);
+  state.entry.rows = [makeRow()];
+  state.entry.editingId = null;
+  state.entry.photo = { dataUrl: "", status: "", busy: false };
+  renderEntry();
+}
+
+function loadRecordIntoEntry(record) {
+  state.entry.scope = record.scope;
+  state.entry.date = record.entry_date || state.meta.today;
+  state.entry.editingId = record.id;
+  state.entry.rows = [
+    makeRow({
+      id: record.id,
+      scope: record.scope,
+      customer_name: record.customer_name || "",
+      truck_model: record.truck_model || "",
+      volume: record.volume === null || record.volume === undefined ? "" : String(record.volume),
+      remark: record.remark || "",
+      amount_override:
+        record.amount_override === null || record.amount_override === undefined ? "" : String(record.amount_override),
+    }),
+  ];
+  switchTab("entry");
+  setTimeout(() => {
+    $("#rows-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    $('[data-field="customer_name"]')?.focus();
+  }, 60);
+}
+
+function cancelEdit() {
+  state.entry.editingId = null;
+  state.entry.rows = [makeRow()];
+  renderEntry();
+}
+
 async function refreshRecent() {
   const wrap = $("#recent-wrap");
   if (!wrap) return;
 
   try {
-    const data = await api(`/api/records?scope=${encodeURIComponent(state.scope)}&limit=20`);
+    const data = await api(`/api/records?scope=${encodeURIComponent(state.entry.scope)}&limit=10`);
+    state.recent = data.rows;
     if (!data.rows.length) {
       wrap.innerHTML = `<div class="empty">还没有记录，先在上方填一条吧</div>`;
       return;
     }
     wrap.innerHTML = `
-      <div class="table-wrap">
+      <div class="table-wrap list-table-wrap">
         <table class="table">
           <thead><tr>
-            <th>日期</th><th>客户名称</th><th>车型</th><th class="num">方量</th><th class="num">单价</th>
-            <th class="num">金额</th><th>备注</th><th class="num">操作</th>
+            <th>日期</th><th>客户名称</th><th>车型</th><th class="num">方量</th>
+            <th class="num">金额</th><th>备注</th><th class="num col-actions">操作</th>
           </tr></thead>
           <tbody>
             ${data.rows
               .map(
                 (row) => `
               <tr>
-                <td>${esc(row.entry_date)}</td>
-                <td class="strong">${esc(row.customer_name)}</td>
-                <td>${esc(row.truck_model) || "—"}</td>
-                <td class="num">${fmt(row.volume, 3)}</td>
-                <td class="num">${fmt(row.unit_price)}</td>
-                <td class="num strong">${fmt(row.amount)}${
+                <td data-label="日期">${esc(row.entry_date)}</td>
+                <td class="strong" data-label="客户">${esc(row.customer_name)}</td>
+                <td data-label="车型">${esc(row.truck_model) || "—"}</td>
+                <td class="num" data-label="方量">${fmt(row.volume, 3)}</td>
+                <td class="num strong" data-label="金额">${fmt(row.amount)}${
                   row.amount_source === "manual" ? ' <span class="badge badge-warn">手动</span>' : ""
                 }</td>
-                <td class="wrap muted">${esc(row.remark) || "—"}</td>
-                <td>
+                <td class="wrap muted" data-label="备注">${esc(row.remark) || "—"}</td>
+                <td data-label="" class="col-actions">
                   <div class="row-actions">
                     <button class="btn btn-sm" type="button" data-edit="${row.id}">编辑</button>
                     <button class="btn btn-sm btn-danger" type="button" data-delete="${row.id}">删除</button>
@@ -533,42 +680,30 @@ async function refreshRecent() {
           </tbody>
         </table>
       </div>
+      <div class="mob-list">
+        ${data.rows
+          .map(
+            (row) => `
+          <div class="mob-row">
+            <div class="mob-title"><b>${esc(row.customer_name)}</b>${
+              row.truck_model ? `<span class="badge">${esc(row.truck_model)}</span>` : ""
+            }</div>
+            <div class="mob-side"><span class="mob-amount">${fmt(row.amount)}<small>元</small></span></div>
+            <div class="mob-sub">${esc(row.entry_date)} · ${fmt(row.volume, 2)} 方${
+              row.remark ? ` · ${esc(row.remark)}` : ""
+            }${row.amount_source === "manual" ? ' · <span class="badge badge-warn">手动</span>' : ""}</div>
+            <div class="mob-actions">
+              <button class="btn btn-sm" type="button" data-edit="${row.id}">编辑</button>
+              <button class="btn btn-sm btn-danger" type="button" data-delete="${row.id}">删除</button>
+            </div>
+          </div>`,
+          )
+          .join("")}
+      </div>
     `;
-
-    $$("[data-edit]", wrap).forEach((button) =>
-      button.addEventListener("click", () => startEdit(Number(button.dataset.edit), data.rows)),
-    );
-    $$("[data-delete]", wrap).forEach((button) =>
-      button.addEventListener("click", () => deleteRecord(Number(button.dataset.delete), refreshRecent)),
-    );
   } catch (error) {
     wrap.innerHTML = `<div class="empty">加载失败：${esc(error.message)}</div>`;
   }
-}
-
-function startEdit(id, rows) {
-  const row = (rows || []).find((item) => item.id === id);
-  if (!row) return;
-
-  state.scope = row.scope;
-  state.editingId = id;
-  renderEntry();
-
-  const scope = currentScope();
-  for (const field of scope.fields) {
-    const input = $(`#f-${field.key}`);
-    if (!input) continue;
-    input.value = row[field.key] ?? "";
-  }
-
-  const amountInput = $("#f-amount_override");
-  if (amountInput) {
-    amountInput.value =
-      row.amount_override === null || row.amount_override === undefined ? "" : row.amount_override;
-  }
-
-  updateLive();
-  $("#entry-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function deleteRecord(id, after) {
@@ -582,146 +717,26 @@ async function deleteRecord(id, after) {
   }
 }
 
-/* ---------------------------------------------------------------- 拍照录入页 */
-
-function photoPanelHtml() {
-  const ocr = state.meta.ocr || {};
-  const photo = state.photo;
-  const hasDrafts = photo.drafts.length > 0;
-
-  return `
-    ${
-      ocr.enabled
-        ? ""
-        : `<div class="notice" style="margin-bottom:12px"><div class="notice-body">
-             服务端还没有配置 <code>DASHSCOPE_API_KEY</code>，拍照识别暂时不可用。
-           </div></div>`
-    }
-
-    <div class="ocr-drop" id="ocr-drop">
-      <input type="file" id="ocr-file" accept="image/*" capture="environment" hidden />
-      <div class="ocr-drop-body">
-        <button class="btn btn-primary" type="button" id="ocr-pick">选择 / 拍摄照片</button>
-        <span class="hint">支持 JPG / PNG；也可以 <b>Ctrl+V 粘贴截图</b>，或把图片拖进来</span>
-        <span class="badge">${esc(ocr.model || "qwen3-vl-plus")}</span>
-      </div>
-      <div id="ocr-preview"></div>
-    </div>
-
-    <div class="form-actions">
-      <button class="btn btn-primary" type="button" id="ocr-run" ${photo.dataUrl && ocr.enabled ? "" : "disabled"}>开始识别</button>
-      ${hasDrafts ? '<button class="btn" type="button" id="ocr-again">重新识别</button>' : ""}
-      <span class="hint" id="ocr-status"></span>
-    </div>
-
-    <div id="ocr-result-card" ${hasDrafts ? "" : "hidden"}>
-      <div class="ocr-result-head">
-        <h3 class="section-title" style="margin:0">识别草稿</h3>
-        <label class="field" style="width:168px"><span>日期</span><input type="date" id="ocr-date" value="${esc(
-          photo.date || state.meta.today,
-        )}" /></label>
-      </div>
-      <div id="ocr-table"></div>
-      <div class="form-actions">
-        <button class="btn btn-primary" type="button" id="ocr-save">确认入库</button>
-        <button class="btn" type="button" id="ocr-clear">清空</button>
-        <span class="spacer"></span>
-        <span class="hint">共 ${photo.drafts.length} 条</span>
-      </div>
-    </div>
-  `;
-}
-
-/** 切到「拍照识别」模式（粘贴图片时自动调用） */
-function switchToPhoto() {
-  state.entryMode = "photo";
-  if (state.tab !== "entry") {
-    switchTab("entry");
-  } else {
-    renderEntry();
-  }
-}
-
-function bindPhotoEvents() {
-  $("#ocr-pick")?.addEventListener("click", () => $("#ocr-file")?.click());
-  $("#ocr-file")?.addEventListener("change", handlePhotoFile);
-  $("#ocr-run")?.addEventListener("click", runOcr);
-  $("#ocr-again")?.addEventListener("click", runOcr);
-
-  const drop = $("#ocr-drop");
-  drop?.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    drop.classList.add("is-over");
-  });
-  drop?.addEventListener("dragleave", () => drop.classList.remove("is-over"));
-  drop?.addEventListener("drop", async (event) => {
-    event.preventDefault();
-    drop.classList.remove("is-over");
-    const file = event.dataTransfer?.files?.[0];
-    if (file) await loadPhotoFile(file);
-  });
-  $("#ocr-save")?.addEventListener("click", saveDrafts);
-  $("#ocr-clear")?.addEventListener("click", () => {
-    state.photo = { dataUrl: "", date: "", drafts: [] };
-    renderEntry();
-  });
-  $("#ocr-date")?.addEventListener("change", (event) => {
-    state.photo.date = event.target.value;
-  });
-}
-
-function renderPhotoPreview() {
-  const wrap = $("#ocr-preview");
-  if (!wrap) return;
-  wrap.innerHTML = state.photo.dataUrl
-    ? `<img class="ocr-preview-img" alt="待识别照片" src="${state.photo.dataUrl}" />`
-    : "";
-}
-
-async function handlePhotoFile(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  await loadPhotoFile(file);
-}
-
-/** 粘贴（Ctrl+V）和拖拽都走这里 */
-function imageFromClipboard(data) {
-  if (!data) return null;
-  for (const item of data.items || []) {
-    if (item.kind === "file" && String(item.type).startsWith("image/")) {
-      return item.getAsFile?.() || null;
-    }
-  }
-  return null;
-}
-
-document.addEventListener("paste", async (event) => {
-  if (!state.meta) return;
-  const file = imageFromClipboard(event.clipboardData);
-  if (!file) return;
-  event.preventDefault();
-  if (state.tab !== "entry" || state.entryMode !== "photo") switchToPhoto();
-  await loadPhotoFile(file);
-});
+/* ---------------------------------------------------------------- 拍照识别 */
 
 async function loadPhotoFile(file) {
   if (!String(file?.type || "").startsWith("image/")) {
     toast("请上传图片文件", true);
     return;
   }
-  if (state.photo.drafts.length && !window.confirm("当前有未入库的草稿，换成新图片会清空，继续？")) {
-    return;
-  }
+
+  const manualRows = state.entry.rows.filter((row) => !row.fromOcr && !rowIsEmpty(row));
+  if (manualRows.length && !window.confirm("换一张图片会丢掉上一次的识别结果，手工填的内容会保留。继续？")) return;
 
   try {
-    const status = $("#ocr-status");
+    state.entry.photo.status = "正在处理图片…";
+    const status = $("#photo-status");
     if (status) status.textContent = "正在处理图片…";
-    state.photo.dataUrl = await compressImage(file);
-    state.photo.drafts = [];
-    state.photo.date = "";
+    state.entry.photo.dataUrl = await compressImage(file);
+    state.entry.photo.status = "图片已就绪，点「开始识别」";
+    state.entry.rows = state.entry.rows.filter((row) => !row.fromOcr);
+    if (!state.entry.rows.length) state.entry.rows = [makeRow()];
     renderEntry();
-    const next = $("#ocr-status");
-    if (next) next.textContent = "图片已就绪，点「开始识别」";
   } catch (error) {
     toast(error.message || "图片处理失败", true);
   }
@@ -752,155 +767,192 @@ async function compressImage(file, maxSide = 2600, quality = 0.88) {
   return canvas.toDataURL("image/jpeg", quality);
 }
 
-async function runOcr() {
-  if (!state.photo.dataUrl) return;
-
-  const status = $("#ocr-status");
-  const button = $("#ocr-run");
-  if (button) button.disabled = true;
-  if (status) status.textContent = "识别中，通常 15–40 秒…";
-
-  try {
-    const result = await api("/api/ocr", { method: "POST", body: { image: state.photo.dataUrl } });
-    state.photo.date = result.date || state.meta.today;
-    state.photo.drafts = result.entries || [];
-    renderEntry();
-    toast(`识别到 ${state.photo.drafts.length} 条，请核对`);
-  } catch (error) {
-    toast(error.message, true);
-    if (status) status.textContent = "";
-    if (button) button.disabled = false;
-  }
-}
-
-function renderDrafts() {
-  const wrap = $("#ocr-table");
-  if (!wrap) return;
-
-  const drafts = state.photo.drafts;
-  if (!drafts.length) {
-    wrap.innerHTML = `<div class="empty">还没有识别结果</div>`;
-    return;
-  }
-
-  wrap.innerHTML = `
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr>
-          <th>表</th><th>客户名称</th><th>车型</th><th class="num">方量</th><th>备注</th>
-          <th>原文</th><th>置信</th><th class="num">操作</th>
-        </tr></thead>
-        <tbody>
-          ${drafts
-            .map(
-              (draft, index) => `
-            <tr>
-              <td>
-                <select data-idx="${index}" data-field="table">
-                  <option value="pump"${draft.table === "pump" ? " selected" : ""}>泵车</option>
-                  <option value="mixer"${draft.table === "mixer" ? " selected" : ""}>搅拌车</option>
-                </select>
-              </td>
-              <td><input type="text" data-idx="${index}" data-field="customer" value="${esc(draft.customer)}" /></td>
-              <td><input type="text" list="dl-truck_model" data-idx="${index}" data-field="truck_model" value="${esc(
-                draft.truck_model || "",
-              )}" placeholder="如 二号" /></td>
-              <td><input type="number" step="0.001" min="0" data-idx="${index}" data-field="volume" value="${esc(
-                draft.volume,
-              )}" /></td>
-              <td><textarea rows="2" data-idx="${index}" data-field="note">${esc(draft.note)}</textarea></td>
-              <td class="wrap muted">${esc(draft.raw) || "—"}</td>
-              <td>${confidenceBadge(draft)}</td>
-              <td><div class="row-actions"><button class="btn btn-sm btn-danger" type="button" data-del="${index}">删除</button></div></td>
-            </tr>`,
-            )
-            .join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-
-  $$("[data-idx]", wrap).forEach((input) => {
-    input.addEventListener("input", () => {
-      const index = Number(input.dataset.idx);
-      const field = input.dataset.field;
-      state.photo.drafts[index][field] = field === "volume" ? Number(input.value) : input.value;
-    });
-    input.addEventListener("change", () => {
-      const index = Number(input.dataset.idx);
-      const field = input.dataset.field;
-      state.photo.drafts[index][field] = field === "volume" ? Number(input.value) : input.value;
-    });
-  });
-
-  $$("[data-del]", wrap).forEach((button) =>
-    button.addEventListener("click", () => {
-      state.photo.drafts.splice(Number(button.dataset.del), 1);
-      renderDrafts();
-      const card = $("#ocr-result-card");
-      if (card && !state.photo.drafts.length) card.hidden = true;
-    }),
-  );
-}
-
-function confidenceBadge(draft) {
-  if (draft.confidence === null || draft.confidence === undefined) return `<span class="badge">—</span>`;
-  const percent = Math.round(draft.confidence * 100);
-  const tone = draft.confidence >= 0.9 ? "badge-ok" : draft.confidence >= 0.7 ? "badge-warn" : "badge-danger";
-  const title = draft.uncertain?.length ? ` title="不确定：${esc(draft.uncertain.join("、"))}"` : "";
-  return `<span class="badge ${tone}"${title}>${percent}%</span>`;
-}
-
-async function saveDrafts() {
-  const date = $("#ocr-date")?.value || state.meta.today;
-  const drafts = state.photo.drafts.filter((draft) => draft.customer.trim() && Number(draft.volume) > 0);
-  const skipped = state.photo.drafts.length - drafts.length;
-  if (!drafts.length) {
-    toast("没有可入库的行（客户和方量都要有值）", true);
-    return;
-  }
-
-  const missingModel = drafts.filter((draft) => draft.table === "pump" && !String(draft.truck_model || "").trim());
-  if (missingModel.length) {
-    toast(`有 ${missingModel.length} 行泵车没填车型（圈号即车号），补一下再入库`, true);
-    return;
-  }
-
-  const button = $("#ocr-save");
-  if (button) button.disabled = true;
-
-  let saved = 0;
-  const errors = [];
-  for (const draft of drafts) {
-    try {
-      await api("/api/records", {
-        method: "POST",
-        body: {
-          scope: draft.table,
-          entry_date: date,
-          customer_name: draft.customer.trim(),
-          truck_model: String(draft.truck_model || "").trim(),
-          volume: Number(draft.volume),
-          remark: draft.note.trim(),
-        },
-      });
-      saved += 1;
-    } catch (error) {
-      errors.push(`${draft.customer}：${error.message}`);
+/** 粘贴（Ctrl+V）和拖拽都走这里 */
+function imageFromClipboard(data) {
+  if (!data) return null;
+  for (const item of data.items || []) {
+    if (item.kind === "file" && String(item.type).startsWith("image/")) {
+      return item.getAsFile?.() || null;
     }
   }
+  return null;
+}
 
-  if (button) button.disabled = false;
+document.addEventListener("paste", async (event) => {
+  if (!state.meta || state.tab !== "entry") return;
+  const file = imageFromClipboard(event.clipboardData);
+  if (!file) return;
+  event.preventDefault();
+  await loadPhotoFile(file);
+});
 
-  if (errors.length) {
-    toast(`已入库 ${saved} 条，失败 ${errors.length} 条：${errors[0]}`, true);
+async function runOcr() {
+  const photo = state.entry.photo;
+  if (!photo.dataUrl || photo.busy) return;
+
+  photo.busy = true;
+  photo.status = "识别中，通常 15–40 秒…";
+  renderEntry();
+
+  try {
+    const result = await api("/api/ocr", { method: "POST", body: { image: photo.dataUrl } });
+    const drafts = result.entries || [];
+    if (result.date) state.entry.date = result.date;
+
+    const kept = state.entry.rows.filter((row) => !row.fromOcr && !rowIsEmpty(row));
+    const mapped = drafts.map((draft) =>
+      makeRow({
+        scope: draft.table,
+        customer_name: draft.customer || "",
+        truck_model: draft.truck_model || "",
+        volume: Number(draft.volume) > 0 ? String(draft.volume) : "",
+        remark: draft.note || "",
+        confidence: draft.confidence ?? null,
+        uncertain: draft.uncertain || [],
+        raw: draft.raw || "",
+        fromOcr: true,
+      }),
+    );
+
+    state.entry.rows = [...kept, ...mapped];
+    state.entry.photo = { dataUrl: "", status: `识别到 ${mapped.length} 条，核对后点保存`, busy: false };
+    renderEntry();
+    toast(`识别到 ${mapped.length} 条，请核对`);
+  } catch (error) {
+    state.entry.photo.busy = false;
+    state.entry.photo.status = "";
+    renderEntry();
+    toast(error.message, true);
+  }
+}
+
+/* ---------------------------------------------------------------- 录入页事件 */
+
+const viewEntry = $("#view-entry");
+
+viewEntry.addEventListener("click", async (event) => {
+  const photoAction = event.target.closest("[data-photo-action]")?.dataset.photoAction;
+  if (photoAction === "pick") return $("#photo-file")?.click();
+  if (photoAction === "run") return runOcr();
+  if (photoAction === "clear") {
+    state.entry.photo = { dataUrl: "", status: "", busy: false };
+    return renderEntry();
+  }
+
+  if (event.target.closest("#photo-strip") && !state.entry.photo.dataUrl) {
+    $("#photo-file")?.click();
     return;
   }
 
-  toast(`已入库 ${saved} 条${skipped ? `（跳过 ${skipped} 行缺客户/方量）` : ""}`);
-  state.photo = { dataUrl: "", date: "", drafts: [] };
-  renderEntry();
-}
+  const scopeButton = event.target.closest("#scope-switch button");
+  if (scopeButton) {
+    if (scopeButton.dataset.scope === state.entry.scope) return;
+    state.entry.scope = scopeButton.dataset.scope;
+    for (const row of state.entry.rows) if (!row.id) row.scope = state.entry.scope;
+    renderEntry();
+    return;
+  }
+
+  if (event.target.closest("#add-row")) {
+    state.entry.rows.push(makeRow());
+    renderRows();
+    const last = $$("#rows-wrap tbody tr").at(-1);
+    last?.querySelector('[data-field="customer_name"]')?.focus();
+    return;
+  }
+
+  if (event.target.closest("#clear-rows")) {
+    state.entry.editingId = null;
+    state.entry.rows = [makeRow()];
+    renderEntry();
+    return;
+  }
+
+  if (event.target.closest("#cancel-edit")) return cancelEdit();
+  if (event.target.closest("#save-rows")) return saveRows();
+  if (event.target.closest("#refresh-recent")) return refreshRecent();
+
+  const remove = event.target.closest("[data-remove]")?.dataset.remove;
+  if (remove) {
+    state.entry.rows = state.entry.rows.filter((row) => row.uid !== remove);
+    if (!state.entry.rows.length) state.entry.rows = [makeRow()];
+    renderRows();
+    scheduleAmounts(0);
+    return;
+  }
+
+  const editId = event.target.closest("[data-edit]")?.dataset.edit;
+  if (editId) {
+    const record = state.recent.find((row) => row.id === Number(editId));
+    if (record) loadRecordIntoEntry(record);
+    return;
+  }
+
+  const deleteId = event.target.closest("[data-delete]")?.dataset.delete;
+  if (deleteId) await deleteRecord(Number(deleteId), refreshRecent);
+});
+
+viewEntry.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-uid]");
+  if (!input) return;
+  const row = findRow(input.dataset.uid);
+  if (!row) return;
+
+  const field = input.dataset.field;
+  row[field] = input.value;
+
+  if (field === "amount_override") {
+    updateAmountCells();
+    updateTotals();
+  } else {
+    scheduleAmounts();
+  }
+});
+
+viewEntry.addEventListener("change", (event) => {
+  const dateInput = event.target.closest("#entry-date");
+  if (dateInput) {
+    state.entry.date = dateInput.value;
+    scheduleAmounts(0);
+    return;
+  }
+
+  const fileInput = event.target.closest("#photo-file");
+  if (fileInput) {
+    const file = fileInput.files?.[0];
+    if (file) void loadPhotoFile(file);
+    fileInput.value = "";
+    return;
+  }
+
+  const input = event.target.closest("[data-uid]");
+  if (!input) return;
+  const row = findRow(input.dataset.uid);
+  if (!row) return;
+
+  row[input.dataset.field] = input.value;
+  if (input.dataset.field === "scope") renderRows();
+  scheduleAmounts(0);
+});
+
+viewEntry.addEventListener("dragover", (event) => {
+  if (!state.meta) return;
+  event.preventDefault();
+  $("#photo-strip")?.classList.add("is-over");
+});
+
+viewEntry.addEventListener("dragleave", (event) => {
+  if (event.target.closest("#photo-strip")) $("#photo-strip")?.classList.remove("is-over");
+});
+
+viewEntry.addEventListener("drop", async (event) => {
+  if (!state.meta) return;
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) return;
+  event.preventDefault();
+  $("#photo-strip")?.classList.remove("is-over");
+  await loadPhotoFile(file);
+});
 
 /* ---------------------------------------------------------------- 看板 */
 
@@ -945,17 +997,22 @@ function renderBoard() {
     applyQuick("month");
     state.boardInitialized = true;
   }
-  const dicts = state.meta.dicts;
+
   const options = (kind, selected) =>
     [`<option value="">全部</option>`]
-      .concat((dicts[kind] || []).map((item) => `<option value="${esc(item.label)}"${item.label === selected ? " selected" : ""}>${esc(item.label)}</option>`))
+      .concat(
+        (state.meta.dicts[kind] || []).map(
+          (item) =>
+            `<option value="${esc(item.label)}"${item.label === selected ? " selected" : ""}>${esc(item.label)}</option>`,
+        ),
+      )
       .join("");
 
   $("#view-board").innerHTML = `
     <div class="stack">
       <div class="card card-tight">
         <form id="filter-form">
-          <div class="filter-bar">
+          <div class="filter-row">
             <div class="quick-dates" id="quick-dates">
               ${[
                 ["today", "今天"],
@@ -973,19 +1030,28 @@ function renderBoard() {
                 )
                 .join("")}
             </div>
-            <label class="field"><span>开始日期</span><input type="date" id="f-from" value="${esc(state.filters.from)}" /></label>
-            <label class="field"><span>结束日期</span><input type="date" id="f-to" value="${esc(state.filters.to)}" /></label>
+            <label class="field"><span>开始</span><input type="date" id="f-from" value="${esc(state.filters.from)}" /></label>
+            <label class="field"><span>结束</span><input type="date" id="f-to" value="${esc(state.filters.to)}" /></label>
+          </div>
+          <div class="filter-row filter-row-bottom">
             <label class="field"><span>表</span>
               <select id="f-scope">
                 <option value="all"${state.filters.scope === "all" ? " selected" : ""}>全部</option>
                 ${state.meta.scopes
-                  .map((scope) => `<option value="${scope.key}"${state.filters.scope === scope.key ? " selected" : ""}>${esc(scope.tableName)}</option>`)
+                  .map(
+                    (scope) =>
+                      `<option value="${scope.key}"${state.filters.scope === scope.key ? " selected" : ""}>${esc(
+                        scope.label,
+                      )}</option>`,
+                  )
                   .join("")}
               </select>
             </label>
-            <label class="field"><span>客户名称</span><select id="f-customer">${options("customer", state.filters.customer)}</select></label>
+            <label class="field"><span>客户</span><select id="f-customer">${options("customer", state.filters.customer)}</select></label>
             <label class="field"><span>车型</span><select id="f-model">${options("truck_model", state.filters.model)}</select></label>
-            <label class="field grow"><span>搜索</span><input type="search" id="f-q" value="${esc(state.filters.q)}" placeholder="客户 / 备注 / 地点" /></label>
+            <label class="field grow"><span>搜索</span><input type="search" id="f-q" value="${esc(
+              state.filters.q,
+            )}" placeholder="客户 / 备注" /></label>
             <div class="btn-row">
               <button class="btn btn-primary" type="submit">查询</button>
               <button class="btn" type="button" id="export-btn">导出 CSV</button>
@@ -998,26 +1064,6 @@ function renderBoard() {
       <div id="board-body"></div>
     </div>
   `;
-
-  $("#quick-dates").addEventListener("click", (event) => {
-    const key = event.target.closest("[data-quick]")?.dataset.quick;
-    if (!key) return;
-    applyQuick(key);
-    renderBoard();
-  });
-
-  $("#filter-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    readFilters();
-    state.filters.quick = "";
-    loadDashboard();
-  });
-
-  $("#export-btn").addEventListener("click", () => {
-    readFilters();
-    const params = filterParams();
-    window.location.href = `/api/export.csv?${params}`;
-  });
 
   loadDashboard();
 }
@@ -1041,7 +1087,7 @@ function filterParams() {
 
 async function loadDashboard() {
   const grid = $("#kpi-grid");
-  if (grid) grid.innerHTML = "";
+  if (grid) grid.innerHTML = `<div class="kpi-group"><div class="kpi-skeleton"></div></div>`.repeat(3);
 
   try {
     state.dashboard = await api(`/api/dashboard?${filterParams()}`);
@@ -1058,12 +1104,14 @@ function renderBoardBody() {
   if (!data) return;
 
   const kpi = data.kpi;
-  const pump = data.scopes?.pump || { count: 0, volume: 0, amount: 0, avgPrice: 0 };
-  const mixer = data.scopes?.mixer || { count: 0, volume: 0, amount: 0, avgPrice: 0 };
+  const pump = data.scopes?.pump || { count: 0, volume: 0, amount: 0 };
+  const mixer = data.scopes?.mixer || { count: 0, volume: 0, amount: 0 };
+  const totalVolume = pump.volume + mixer.volume || 1;
+  const pumpShare = Math.round((pump.volume / totalVolume) * 100);
 
   $("#kpi-grid").innerHTML = `
     <div class="kpi-group is-accent">
-      <div class="kpi-group-head">总计</div>
+      <div class="kpi-group-head">总计 <span class="kpi-range">${esc(rangeLabel())}</span></div>
       <div class="kpi-row"><span>总方量</span><b>${fmt(kpi.volume, 3)}<small>方</small></b></div>
       <div class="kpi-row"><span>总金额</span><b>${fmt(kpi.amount)}<small>元</small></b></div>
     </div>
@@ -1072,17 +1120,19 @@ function renderBoardBody() {
       <div class="kpi-row"><span>方量</span><b>${fmt(pump.volume, 3)}<small>方</small></b></div>
       <div class="kpi-row"><span>记录数</span><b>${pump.count}<small>条</small></b></div>
       <div class="kpi-row"><span>金额</span><b>${fmt(pump.amount)}<small>元</small></b></div>
+      <div class="share-bar" title="方量占比 ${pumpShare}%"><span style="width:${pumpShare}%"></span></div>
     </div>
     <div class="kpi-group">
       <div class="kpi-group-head">搅拌车</div>
       <div class="kpi-row"><span>方量</span><b>${fmt(mixer.volume, 3)}<small>方</small></b></div>
       <div class="kpi-row"><span>金额</span><b>${fmt(mixer.amount)}<small>元</small></b></div>
+      <div class="share-bar" title="方量占比 ${100 - pumpShare}%"><span class="is-mixer" style="width:${100 - pumpShare}%"></span></div>
     </div>
   `;
 
   const notices = [];
   if (!data.priceConfigured) {
-    notices.push(`还没有配置单价，金额会全部是 0。请到“配置 → 单价配置”填写，或设置一条默认单价。`);
+    notices.push("公式用到了「单价」，但单价表里还没有正数价格，金额可能全是 0（配置 → 单价表）。");
   }
   if (kpi.missingPrices > 0) {
     notices.push(`有 ${kpi.missingPrices} 条记录没有匹配到单价（已按 0 计算）。`);
@@ -1096,7 +1146,7 @@ function renderBoardBody() {
   document.body.classList.toggle("health-bad", health === "bad");
   document.body.classList.toggle("health-warn", health === "warn");
 
-  const groupTabs = [
+  const groups = [
     ["customer", "按客户"],
     ["model", "按车型"],
     ["date", "按日期"],
@@ -1105,16 +1155,28 @@ function renderBoardBody() {
 
   $("#board-body").innerHTML = `
     ${notices
-      .map(
-        (text) => `<div class="card card-tight"><div class="notice"><div class="notice-body">${esc(text)}</div></div></div>`,
-      )
+      .map((text) => `<div class="card card-tight"><div class="notice"><div class="notice-body">${esc(text)}</div></div></div>`)
       .join("")}
+
     <div class="card">
       <div class="card-head">
-        <div><h2 class="card-title">汇总</h2><p class="card-desc">按不同维度汇总方量与金额</p></div>
+        <div><h2 class="card-title">汇总</h2><p class="card-desc">按客户 / 车型 / 日期 / 表汇总方量与金额</p></div>
         <div class="spacer"></div>
+        <div class="segmented" id="chart-metric">
+          ${[
+            ["volume", "方量"],
+            ["amount", "金额"],
+          ]
+            .map(
+              ([key, label]) =>
+                `<button type="button" data-metric="${key}" class="${
+                  state.chartMetric === key ? "is-active" : ""
+                }">${label}</button>`,
+            )
+            .join("")}
+        </div>
         <div class="segmented" id="group-tabs">
-          ${groupTabs
+          ${groups
             .map(
               ([key, label]) =>
                 `<button type="button" data-group="${key}" class="${state.groupBy === key ? "is-active" : ""}">${label}</button>`,
@@ -1122,28 +1184,60 @@ function renderBoardBody() {
             .join("")}
         </div>
       </div>
+      <div id="chart"></div>
       <div id="group-table"></div>
     </div>
 
     <div class="card card-tight">
       <div class="card-head">
-        <div><h2 class="card-title">明细</h2><p class="card-desc">共 ${data.rows.length} 条，点击“编辑”可载入录入页修改</p></div>
+        <div><h2 class="card-title">明细</h2><p class="card-desc">共 ${data.rows.length} 条，点“编辑”可到录入页修改</p></div>
       </div>
       <div id="detail-table"></div>
       <div class="pagination" id="pagination"></div>
     </div>
   `;
 
-  $("#group-tabs").addEventListener("click", (event) => {
-    const key = event.target.closest("[data-group]")?.dataset.group;
-    if (!key) return;
-    state.groupBy = key;
-    $$("#group-tabs button").forEach((button) => button.classList.toggle("is-active", button.dataset.group === key));
-    renderGroupTable();
-  });
-
+  renderChart();
   renderGroupTable();
   renderDetailTable();
+}
+
+function rangeLabel() {
+  const { from, to } = state.filters;
+  if (!from && !to) return "全部时间";
+  if (from === to) return from;
+  return `${from || "开始"} ~ ${to || "今天"}`;
+}
+
+function renderChart() {
+  const wrap = $("#chart");
+  if (!wrap) return;
+
+  const rows = (state.dashboard?.groups?.date || []).filter((row) => row.key !== "未填日期");
+  if (rows.length < 2) {
+    wrap.innerHTML = "";
+    return;
+  }
+
+  const metric = state.chartMetric;
+  const pick = (row) => (metric === "amount" ? row.amount : row.volume);
+  const list = rows.slice(-16);
+  const max = Math.max(...list.map(pick), 1);
+
+  wrap.innerHTML = `
+    <div class="chart-bars">
+      ${list
+        .map((row) => {
+          const height = Math.max(2, (pick(row) / max) * 100);
+          return `<div class="chart-col" title="${esc(row.key)}：${fmt(row.volume, 3)} 方 · ${fmt(row.amount)} 元">
+            <span class="chart-value">${metric === "amount" ? fmt(row.amount) : fmt(row.volume, 1)}</span>
+            <span class="chart-bar" style="height:${height.toFixed(1)}%"></span>
+            <span class="chart-x">${esc(row.key.slice(5))}</span>
+          </div>`;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function renderGroupTable() {
@@ -1152,24 +1246,49 @@ function renderGroupTable() {
   const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0) || 1;
 
   $("#group-table").innerHTML = rows.length
-    ? `<div class="table-wrap">
+    ? `<div class="table-wrap list-table-wrap">
         <table class="table">
           <thead><tr><th>名称</th><th class="num">记录数</th><th class="num">方量</th><th class="num">金额</th><th>金额占比</th></tr></thead>
           <tbody>
             ${rows
-              .map(
-                (row) => `
+              .map((row) => {
+                const percent = (row.amount / totalAmount) * 100;
+                return `
               <tr>
                 <td class="strong">${esc(row.key) || "—"}</td>
                 <td class="num">${row.count}</td>
                 <td class="num">${fmt(row.volume, 3)}</td>
                 <td class="num strong">${fmt(row.amount)}</td>
-                <td><div class="bar"><span style="width:${Math.max(2, (row.amount / totalAmount) * 100).toFixed(1)}%"></span></div></td>
-              </tr>`,
-              )
+                <td>
+                  <div class="share">
+                    <div class="bar"><span style="width:${Math.max(2, percent).toFixed(1)}%"></span></div>
+                    <span class="pct">${percent.toFixed(1)}%</span>
+                  </div>
+                </td>
+              </tr>`;
+              })
               .join("")}
           </tbody>
         </table>
+      </div>
+      <div class="mob-list">
+        ${rows
+          .map((row) => {
+            const percent = (row.amount / totalAmount) * 100;
+            return `
+          <div class="mob-row">
+            <div class="mob-title"><b>${esc(row.key) || "—"}</b></div>
+            <div class="mob-side"><span class="mob-amount">${fmt(row.amount)}<small>元</small></span></div>
+            <div class="mob-sub">${row.count} 条 · ${fmt(row.volume, 2)} 方</div>
+            <div class="mob-bar">
+              <div class="share">
+                <div class="bar"><span style="width:${Math.max(2, percent).toFixed(1)}%"></span></div>
+                <span class="pct">${percent.toFixed(1)}%</span>
+              </div>
+            </div>
+          </div>`;
+          })
+          .join("")}
       </div>`
     : `<div class="empty">当前筛选条件下没有数据</div>`;
 }
@@ -1183,11 +1302,11 @@ function renderDetailTable() {
   const slice = rows.slice(start, start + state.pageSize);
 
   $("#detail-table").innerHTML = slice.length
-    ? `<div class="table-wrap">
+    ? `<div class="table-wrap list-table-wrap">
         <table class="table">
           <thead><tr>
             <th>日期</th><th>表</th><th>车型</th><th>客户名称</th><th class="num">方量</th>
-            <th class="num">单价</th><th class="num">金额</th><th>备注</th><th class="num">操作</th>
+            <th class="num">金额</th><th>备注</th><th class="num col-actions">操作</th>
           </tr></thead>
           <tbody>
             ${slice
@@ -1199,14 +1318,11 @@ function renderDetailTable() {
                 <td>${esc(row.truck_model) || "—"}</td>
                 <td class="strong">${esc(row.customer_name)}</td>
                 <td class="num">${fmt(row.volume, 3)}</td>
-                <td class="num">${fmt(row.unit_price)}</td>
                 <td class="num strong">${
-                  row.amount_error
-                    ? '<span class="badge badge-danger">公式错误</span>'
-                    : fmt(row.amount)
+                  row.amount_error ? '<span class="badge badge-danger">公式错误</span>' : fmt(row.amount)
                 }${row.amount_source === "manual" ? ' <span class="badge badge-warn">手动</span>' : ""}</td>
                 <td class="wrap muted">${esc(row.remark) || "—"}</td>
-                <td>
+                <td class="col-actions">
                   <div class="row-actions">
                     <button class="btn btn-sm" type="button" data-edit="${row.id}">编辑</button>
                     <button class="btn btn-sm btn-danger" type="button" data-delete="${row.id}">删除</button>
@@ -1217,6 +1333,30 @@ function renderDetailTable() {
               .join("")}
           </tbody>
         </table>
+      </div>
+      <div class="mob-list">
+        ${slice
+          .map(
+            (row) => `
+          <div class="mob-row">
+            <div class="mob-title"><b>${esc(row.customer_name)}</b><span class="badge badge-${
+              row.scope === "pump" ? "pump" : "mixer"
+            }">${esc(row.scope_label)}</span>${
+              row.truck_model ? `<span class="badge">${esc(row.truck_model)}</span>` : ""
+            }</div>
+            <div class="mob-side"><span class="mob-amount">${
+              row.amount_error ? "错误" : fmt(row.amount)
+            }<small>元</small></span></div>
+            <div class="mob-sub">${esc(row.entry_date)} · ${fmt(row.volume, 2)} 方${
+              row.remark ? ` · ${esc(row.remark)}` : ""
+            }</div>
+            <div class="mob-actions">
+              <button class="btn btn-sm" type="button" data-edit="${row.id}">编辑</button>
+              <button class="btn btn-sm btn-danger" type="button" data-delete="${row.id}">删除</button>
+            </div>
+          </div>`,
+          )
+          .join("")}
       </div>`
     : `<div class="empty">当前筛选条件下没有数据</div>`;
 
@@ -1228,138 +1368,208 @@ function renderDetailTable() {
         : `<span>第 ${state.page} / ${pages} 页 · 共 ${rows.length} 条</span>
            <button class="btn btn-sm" type="button" data-page="prev" ${state.page <= 1 ? "disabled" : ""}>上一页</button>
            <button class="btn btn-sm" type="button" data-page="next" ${state.page >= pages ? "disabled" : ""}>下一页</button>`;
+  }
+}
 
-    $$("[data-page]").forEach((button) =>
-      button.addEventListener("click", () => {
-        state.page += button.dataset.page === "next" ? 1 : -1;
-        renderDetailTable();
-      }),
-    );
+/* ---------------------------------------------------------------- 看板事件 */
+
+const viewBoard = $("#view-board");
+
+viewBoard.addEventListener("click", async (event) => {
+  const quick = event.target.closest("[data-quick]")?.dataset.quick;
+  if (quick) {
+    applyQuick(quick);
+    renderBoard();
+    return;
   }
 
-  $$("#detail-table [data-edit]").forEach((button) =>
-    button.addEventListener("click", () => {
-      const id = Number(button.dataset.edit);
-      switchTab("entry");
-      startEdit(id, rows);
-    }),
-  );
+  const group = event.target.closest("[data-group]")?.dataset.group;
+  if (group) {
+    state.groupBy = group;
+    $$("#group-tabs button").forEach((button) => button.classList.toggle("is-active", button.dataset.group === group));
+    renderGroupTable();
+    return;
+  }
 
-  $$("#detail-table [data-delete]").forEach((button) =>
-    button.addEventListener("click", () =>
-      deleteRecord(Number(button.dataset.delete), async () => {
-        await loadDashboard();
-      }),
-    ),
-  );
-}
+  const metric = event.target.closest("[data-metric]")?.dataset.metric;
+  if (metric) {
+    state.chartMetric = metric;
+    $$("#chart-metric button").forEach((button) => button.classList.toggle("is-active", button.dataset.metric === metric));
+    renderChart();
+    return;
+  }
+
+  if (event.target.closest("#export-btn")) {
+    readFilters();
+    window.location.href = `/api/export.csv?${filterParams()}`;
+    return;
+  }
+
+  const page = event.target.closest("[data-page]")?.dataset.page;
+  if (page) {
+    state.page += page === "next" ? 1 : -1;
+    renderDetailTable();
+    return;
+  }
+
+  const editId = event.target.closest("#detail-table [data-edit]")?.dataset.edit;
+  if (editId) {
+    const record = state.dashboard.rows.find((row) => row.id === Number(editId));
+    if (record) loadRecordIntoEntry(record);
+    return;
+  }
+
+  const deleteId = event.target.closest("#detail-table [data-delete]")?.dataset.delete;
+  if (deleteId) await deleteRecord(Number(deleteId), loadDashboard);
+});
+
+viewBoard.addEventListener("submit", (event) => {
+  if (!event.target.closest("#filter-form")) return;
+  event.preventDefault();
+  readFilters();
+  state.filters.quick = "";
+  loadDashboard();
+});
 
 /* ---------------------------------------------------------------- 配置页 */
 
+function customerOptions(selected) {
+  const items = state.meta.dicts.customer || [];
+  return [`<option value=""${selected ? "" : " selected"}>（空）</option>`]
+    .concat(
+      items.map(
+        (item) => `<option value="${esc(item.label)}"${item.label === selected ? " selected" : ""}>${esc(item.label)}</option>`,
+      ),
+    )
+    .join("");
+}
+
+function modelOptions(selected) {
+  const items = state.meta.dicts.truck_model || [];
+  return [`<option value=""${selected ? "" : " selected"}>（空）</option>`]
+    .concat(
+      items.map(
+        (item) => `<option value="${esc(item.label)}"${item.label === selected ? " selected" : ""}>${esc(item.label)}</option>`,
+      ),
+    )
+    .join("");
+}
+
+function previewSample(scopeKey) {
+  if (!state.preview[scopeKey]) {
+    const customers = state.meta.dicts.customer || [];
+    const preferred = customers.find((item) => item.label === "蒲发混凝土") || customers[0];
+    state.preview[scopeKey] = {
+      customer: preferred?.label || "",
+      model: (state.meta.dicts.truck_model || [])[0]?.label || "",
+      date: state.meta.today,
+    };
+  }
+  return state.preview[scopeKey];
+}
+
 function renderConfig() {
   const meta = state.meta;
+  const usesPrice = Boolean(meta.usesPrice);
 
   $("#view-config").innerHTML = `
     <div class="stack">
-      ${
-        !meta.priceConfigured
-          ? `<div class="card card-tight"><div class="notice"><div class="notice-body">
-              当前所有单价都是 0，看板金额会显示为 0。请在下方“单价配置”里设置默认单价（客户、车型都填 <code>*</code>），
-              或按客户 / 车型分别设置。
-             </div></div></div>`
-          : ""
-      }
-
       <div class="card">
         <div class="card-head">
-          <div><h2 class="card-title">名称配置</h2><p class="card-desc">客户名称、车型都是可维护的选项，录入时也可直接输入新值并自动收录</p></div>
+          <div>
+            <h2 class="card-title">金额规则</h2>
+            <p class="card-desc">变量就是表格的列名；改公式后下方预览立刻按新规则试算，满意再保存</p>
+          </div>
+          <div class="spacer"></div>
+          <span class="badge">不使用 eval · 语法安全</span>
         </div>
-        <div class="config-grid">
-          ${Object.keys(meta.dictKinds)
-            .map(
-              (kind) => `
-            <div>
-              <h3 class="section-title">${esc(meta.dictKinds[kind]?.label || kind)}</h3>
-              <div class="inline-add">
-                <input type="text" id="new-${kind}" placeholder="新增${esc(meta.dictKinds[kind]?.label || "")}" />
-                <button class="btn btn-sm" type="button" data-add-dict="${kind}">添加</button>
-              </div>
-              <div class="dict-list">
-                ${
-                  (meta.dicts[kind] || [])
-                    .map(
-                      (item) => `
-                  <div class="dict-item">
-                    <span class="grow">${esc(item.label)}</span>
-                    <button class="btn btn-sm btn-ghost" type="button" data-del-dict="${item.id}" title="删除">✕</button>
-                  </div>`,
-                    )
-                    .join("") || `<div class="empty">还没有选项</div>`
-                }
-              </div>
-            </div>`,
-            )
-            .join("")}
-        </div>
+        <div class="rule-grid">${meta.scopes.map((scope) => ruleCardHtml(scope)).join("")}</div>
       </div>
 
       <div class="card">
         <div class="card-head">
-          <div><h2 class="card-title">单价配置</h2><p class="card-desc">匹配顺序：客户+车型 → 客户默认 → 车型默认 → 全局默认（<code>*</code>）</p></div>
+          <div><h2 class="card-title">名称选项</h2><p class="card-desc">录入时的候选值；直接输入新名称也会自动收录</p></div>
         </div>
-        <form id="price-form">
-          <div class="form-grid">
-            <label class="field"><span>表</span>
-              <select id="p-scope">
-                ${meta.scopes.map((scope) => `<option value="${scope.key}">${esc(scope.tableName)}</option>`).join("")}
-              </select>
-            </label>
-            <label class="field"><span>客户名称</span>
-              <input id="p-customer" type="text" list="dl-customer" placeholder="* = 任意客户" value="*" />
-            </label>
-            <label class="field"><span>车型</span>
-              <input id="p-model" type="text" list="dl-truck_model" placeholder="* = 任意车型" value="*" />
-            </label>
-            <label class="field"><span>单价（元/方）</span><input id="p-price" type="number" step="0.01" min="0" placeholder="0.00" /></label>
-            <label class="field span-2"><span>备注</span><input id="p-note" type="text" placeholder="例如：2026 年 11 月起执行" /></label>
-          </div>
-          <div class="form-actions">
-            <button class="btn btn-primary" type="submit">保存单价</button>
-          </div>
-        </form>
-        <div id="price-table" style="margin-top:14px"></div>
+        <div class="config-grid" id="dict-grid">
+          ${Object.keys(meta.dictKinds).map((kind) => dictColumnHtml(kind)).join("")}
+        </div>
         ${datalistsHtml()}
       </div>
 
-      <div class="card">
-        <div class="card-head">
-          <div><h2 class="card-title">公式配置</h2><p class="card-desc">变量就是两张表的列名，可点下方“变量”插入；不使用 eval，语法安全</p></div>
+      <details class="card details-card" ${usesPrice ? "open" : ""}>
+        <summary>
+          <span class="card-title">单价表</span>
+          <span class="hint">${
+            usesPrice ? "公式里的「单价()」按客户 / 车型匹配这里的价格" : "当前公式没有用到「单价」，可以忽略这一节"
+          }</span>
+        </summary>
+        <div class="details-body">
+          <form id="price-form">
+            <div class="form-grid">
+              <label class="field"><span>表</span>
+                <select id="p-scope">
+                  ${meta.scopes.map((scope) => `<option value="${scope.key}">${esc(scope.label)}</option>`).join("")}
+                </select>
+              </label>
+              <label class="field"><span>客户名称</span>
+                <input id="p-customer" type="text" list="dl-customer" placeholder="* = 任意客户" value="*" />
+              </label>
+              <label class="field"><span>车型</span>
+                <input id="p-model" type="text" list="dl-truck_model" placeholder="* = 任意车型" value="*" />
+              </label>
+              <label class="field"><span>单价（元/方）</span><input id="p-price" type="number" step="0.01" min="0" placeholder="0.00" /></label>
+              <label class="field span-2"><span>备注</span><input id="p-note" type="text" placeholder="例如：2026 年 11 月起执行" /></label>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary btn-sm" type="submit">保存单价</button>
+              <span class="hint">匹配顺序：客户+车型 → 客户 → 车型 → 全局（*）</span>
+            </div>
+          </form>
+          <div id="price-table" style="margin-top:14px"></div>
         </div>
-        <div class="split" id="formula-editors">
-          ${meta.scopes.map((scope) => formulaEditorHtml(scope)).join("")}
-        </div>
-      </div>
+      </details>
     </div>
   `;
 
-  bindConfigEvents();
   renderPriceTable();
+  for (const scope of meta.scopes) computePreview(scope.key);
 }
 
-function formulaEditorHtml(scope) {
-  const formula = state.meta.formulas[scope.key] || { volume_formula: "", amount_formula: "", amount_decimals: 2 };
+function ruleCardHtml(scope) {
+  const formula = state.meta.formulas[scope.key] || {
+    volume_formula: "",
+    amount_formula: "",
+    amount_decimals: 2,
+  };
+  const sample = previewSample(scope.key);
 
   return `
-    <div class="card card-tight" data-formula-scope="${scope.key}">
-      <h3 class="section-title">${esc(scope.tableName)}</h3>
-      <div class="formula-box">
+    <div class="rule-card" data-scope="${scope.key}">
+      <div class="rule-head">
+        <span class="badge badge-${scope.key}">${esc(scope.label)}</span>
+        <span class="rule-saved mono" data-saved="${scope.key}" title="当前生效的金额公式">${esc(
+          formula.amount_formula,
+        )}</span>
+      </div>
+
+      <label class="field">
+        <span>金额公式</span>
+        <input class="formula-input" data-formula="amount_formula" data-scope-input="${scope.key}" value="${esc(
+          formula.amount_formula,
+        )}" spellcheck="false" autocomplete="off" />
+      </label>
+
+      <div class="vars" data-vars="${scope.key}">
+        ${state.meta.variables
+          .map((name) => `<button class="var-chip" type="button" data-var="${esc(name)}">${esc(name)}</button>`)
+          .join("")}
+      </div>
+
+      <details class="rule-extra">
+        <summary>方量公式 / 小数位 / 可用函数</summary>
         <div class="formula-row">
           <span>方量公式</span>
-          <input class="formula-input" data-formula="volume_formula" value="${esc(formula.volume_formula)}" />
-        </div>
-        <div class="formula-row">
-          <span>金额公式</span>
-          <input class="formula-input" data-formula="amount_formula" value="${esc(formula.amount_formula)}" />
+          <input class="formula-input" data-formula="volume_formula" value="${esc(formula.volume_formula)}" spellcheck="false" autocomplete="off" />
         </div>
         <div class="formula-row">
           <span>金额小数位</span>
@@ -1369,170 +1579,131 @@ function formulaEditorHtml(scope) {
               .join("")}
           </select>
         </div>
-        <div class="vars" data-vars="${scope.key}">
-          ${state.meta.variables
-            .map((name) => `<button class="var-chip" type="button" data-var="${esc(name)}">${esc(name)}</button>`)
-            .join("")}
-        </div>
         <div class="func-list">
-          ${state.meta.functions
-            .map((fn) => `<div><code>${esc(fn.syntax)}</code> — ${esc(fn.description)}</div>`)
-            .join("")}
+          ${state.meta.functions.map((fn) => `<div><code>${esc(fn.syntax)}</code><span>${esc(fn.description)}</span></div>`).join("")}
         </div>
-        <div class="preview" data-preview="${scope.key}">点击“试算”查看结果</div>
-        <div class="form-actions">
-          <button class="btn btn-primary btn-sm" type="button" data-save-formula="${scope.key}">保存公式</button>
-          <button class="btn btn-sm" type="button" data-test-formula="${scope.key}">试算</button>
+      </details>
+
+      <div class="rule-preview">
+        <div class="preview-controls">
+          <label class="field"><span>试算客户</span>
+            <select data-preview="customer" data-preview-scope="${scope.key}">${customerOptions(sample.customer)}</select>
+          </label>
+          <label class="field"><span>车型</span>
+            <select data-preview="model" data-preview-scope="${scope.key}">${modelOptions(sample.model)}</select>
+          </label>
+          <label class="field"><span>日期</span>
+            <input type="date" data-preview="date" data-preview-scope="${scope.key}" value="${esc(sample.date)}" />
+          </label>
         </div>
+        <div class="preview-result" data-preview="${scope.key}"><div class="empty">试算中…</div></div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary btn-sm" type="button" data-save-formula="${scope.key}">保存规则</button>
+        <button class="btn btn-sm" type="button" data-reset-formula="${scope.key}">恢复默认</button>
+        <span class="spacer"></span>
+        <span class="hint">金额保留 ${formula.amount_decimals} 位小数</span>
       </div>
     </div>
   `;
 }
 
-function bindConfigEvents() {
-  $$("[data-add-dict]").forEach((button) =>
-    button.addEventListener("click", async () => {
-      const kind = button.dataset.addDict;
-      const input = $(`#new-${kind}`);
-      const label = (input?.value || "").trim();
-      if (!label) return toast("请输入名称", true);
-      try {
-        await api("/api/dicts", { method: "POST", body: { kind, scope: "both", label } });
-        toast("已添加");
-        state.meta = await api("/api/meta");
-        renderConfig();
-      } catch (error) {
-        toast(error.message, true);
-      }
-    }),
-  );
+function dictColumnHtml(kind) {
+  const label = state.meta.dictKinds[kind]?.label || kind;
+  const items = state.meta.dicts[kind] || [];
 
-  $$("[data-del-dict]").forEach((button) =>
-    button.addEventListener("click", async () => {
-      if (!window.confirm("删除这个选项？已录入的记录不受影响。")) return;
-      try {
-        await api(`/api/dicts/${button.dataset.delDict}`, { method: "DELETE" });
-        toast("已删除");
-        state.meta = await api("/api/meta");
-        renderConfig();
-      } catch (error) {
-        toast(error.message, true);
-      }
-    }),
-  );
-
-  $("#price-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const body = {
-      scope: $("#p-scope").value,
-      customer_name: $("#p-customer").value.trim() || "*",
-      truck_model: $("#p-model").value.trim() || "*",
-      price: Number($("#p-price").value),
-      note: $("#p-note").value.trim(),
-    };
-    if (!Number.isFinite(body.price) || body.price < 0) return toast("单价必须是不小于 0 的数字", true);
-
-    try {
-      await api("/api/prices", { method: "POST", body });
-      toast("单价已保存");
-      $("#p-price").value = "";
-      $("#p-note").value = "";
-      state.meta = await api("/api/meta");
-      renderConfig();
-    } catch (error) {
-      toast(error.message, true);
-    }
-  });
-
-  $$("[data-var]").forEach((button) =>
-    button.addEventListener("click", () => {
-      const editor = button.closest("[data-formula-scope]");
-      const fallback = editor.querySelector('[data-formula="amount_formula"]');
-      const focused = lastFormulaInput && editor.contains(lastFormulaInput) ? lastFormulaInput : fallback;
-      insertAtCursor(focused, button.dataset.var);
-    }),
-  );
-
-  $$("#formula-editors .formula-input").forEach((input) =>
-    input.addEventListener("focus", () => {
-      lastFormulaInput = input;
-    }),
-  );
-
-  $$("[data-save-formula]").forEach((button) =>
-    button.addEventListener("click", async () => {
-      const scopeKey = button.dataset.saveFormula;
-      const editor = button.closest("[data-formula-scope]");
-      const body = {
-        scope: scopeKey,
-        volume_formula: editor.querySelector('[data-formula="volume_formula"]').value.trim(),
-        amount_formula: editor.querySelector('[data-formula="amount_formula"]').value.trim(),
-        amount_decimals: Number(editor.querySelector('[data-formula="amount_decimals"]').value),
-      };
-      try {
-        await api("/api/formulas", { method: "PUT", body });
-        toast("公式已保存");
-        state.meta = await api("/api/meta");
-      } catch (error) {
-        toast(error.message, true);
-      }
-    }),
-  );
-
-  $$("[data-test-formula]").forEach((button) =>
-    button.addEventListener("click", () => testFormula(button.dataset.testFormula)),
-  );
-
-  $$("[data-preview]").forEach((node) => {
-    if (node.dataset.preview) node.dataset.ready = "1";
-  });
+  return `
+    <div class="dict-column" data-kind="${kind}">
+      <h3 class="section-title">${esc(label)}<span class="badge">${items.length}</span></h3>
+      <div class="chip-list">
+        ${
+          items
+            .map(
+              (item) =>
+                `<span class="chip">${esc(item.label)}<button type="button" data-del-dict="${item.id}" title="移除">×</button></span>`,
+            )
+            .join("") || `<span class="hint">还没有选项</span>`
+        }
+      </div>
+      <div class="inline-add">
+        <input type="text" id="new-${kind}" placeholder="新增${esc(label)}" />
+        <button class="btn btn-sm" type="button" data-add-dict="${kind}">添加</button>
+      </div>
+    </div>
+  `;
 }
 
-function insertAtCursor(input, text) {
-  const start = input.selectionStart ?? input.value.length;
-  const end = input.selectionEnd ?? input.value.length;
-  input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
-  input.focus();
-  input.selectionStart = input.selectionEnd = start + text.length;
+const PREVIEW_VOLUMES = [8, 10, 20, 30, 40, 88];
+let previewTimers = new Map();
+
+function schedulePreview(scopeKey, delay = 450) {
+  clearTimeout(previewTimers.get(scopeKey));
+  previewTimers.set(
+    scopeKey,
+    setTimeout(() => void computePreview(scopeKey), delay),
+  );
 }
 
-async function testFormula(scopeKey) {
-  const editor = $(`[data-formula-scope="${scopeKey}"]`);
-  const preview = $(`[data-preview="${scopeKey}"]`);
-  const volumeExpression = editor.querySelector('[data-formula="volume_formula"]').value.trim();
-  const amountExpression = editor.querySelector('[data-formula="amount_formula"]').value.trim();
+async function computePreview(scopeKey) {
+  // 用 .rule-card 限定：录入页的「泵车/搅拌车」按钮也带 data-scope
+  const card = $(".rule-card" + `[data-scope="${scopeKey}"]`);
+  const target = $(`.preview-result[data-preview="${scopeKey}"]`);
+  if (!card || !target) return;
 
-  const dicts = state.meta.dicts;
-  const sample = {
-    entry_date: state.meta.today,
-    truck_model: (dicts.truck_model[0] || {}).label || "",
-    customer_name: (dicts.customer[0] || {}).label || "",
-    remark: "12*2+11",
-    volume: "",
+  const expression = card.querySelector('[data-formula="amount_formula"]').value.trim() || "0";
+  const sample = previewSample(scopeKey);
+  const body = {
+    scope: scopeKey,
+    expression,
+    entry_date: sample.date,
+    customer_name: sample.customer,
+    truck_model: sample.model,
+    remark: "",
   };
 
-  preview.textContent = "试算中…";
-  try {
-    const volumeResult = await api("/api/evaluate", {
-      method: "POST",
-      body: { scope: scopeKey, expression: volumeExpression, ...sample },
-    });
-    const volume = volumeResult.ok ? Number(volumeResult.value) : 0;
-
-    const amountResult = await api("/api/evaluate", {
-      method: "POST",
-      body: { scope: scopeKey, expression: amountExpression, ...sample, volume },
-    });
-
-    preview.innerHTML = `
-      <span>方量：${volumeResult.ok ? `<span class="ok">${fmt(volumeResult.value, 3)}</span>` : `<span class="bad">${esc(volumeResult.error)}</span>`}</span>
-      <span>单价：${fmt(amountResult.unitPrice)} 元/方</span>
-      <span>金额：${amountResult.ok ? `<span class="ok">${fmt(amountResult.value)} 元</span>` : `<span class="bad">${esc(amountResult.error)}</span>`}</span>
-      <span class="muted">（示例：客户 ${esc(sample.customer_name)}，车型 ${esc(sample.truck_model)}，备注 12*2+11）</span>
-    `;
-  } catch (error) {
-    preview.innerHTML = `<span class="bad">${esc(error.message)}</span>`;
+  const results = [];
+  for (const volume of PREVIEW_VOLUMES) {
+    try {
+      const result = await api("/api/evaluate", { method: "POST", body: { ...body, volume } });
+      results.push({ volume, amount: result.ok ? Number(result.value) : null, error: result.ok ? "" : result.error });
+    } catch (error) {
+      results.push({ volume, amount: null, error: error.message });
+    }
   }
+
+  const ok = results.filter((item) => item.amount !== null);
+  if (!ok.length) {
+    target.innerHTML = `<div class="empty">${esc(results[0]?.error || "公式无法计算")}</div>`;
+    return;
+  }
+
+  const max = Math.max(...ok.map((item) => item.amount), 1);
+
+  target.innerHTML = `
+    <table class="mini-table">
+      <thead><tr><th class="num">方量</th><th class="num">金额</th><th></th></tr></thead>
+      <tbody>
+        ${results
+          .map(
+            (item) => `
+          <tr>
+            <td class="num">${item.volume}</td>
+            <td class="num strong">${
+              item.amount === null ? `<span class="badge badge-danger">错误</span>` : fmt(item.amount)
+            }</td>
+            <td class="mini-bar-col"><div class="bar"><span style="width:${
+              item.amount === null ? 0 : Math.max(3, (item.amount / max) * 100).toFixed(1)
+            }%"></span></div></td>
+          </tr>`,
+          )
+          .join("")}
+      </tbody>
+    </table>
+    <p class="hint preview-note">按「${esc(sample.customer || "空客户")} / ${esc(sample.model || "空车型")} / ${esc(
+      sample.date,
+    )}」试算</p>
+  `;
 }
 
 function renderPriceTable() {
@@ -1562,20 +1733,164 @@ function renderPriceTable() {
         </table>
       </div>`
     : `<div class="empty">还没有单价</div>`;
+}
 
-  $$("[data-del-price]").forEach((button) =>
-    button.addEventListener("click", async () => {
-      if (!window.confirm("删除这条单价？")) return;
-      try {
-        await api(`/api/prices/${button.dataset.delPrice}`, { method: "DELETE" });
-        toast("已删除");
-        state.meta = await api("/api/meta");
-        renderConfig();
-      } catch (error) {
-        toast(error.message, true);
-      }
-    }),
-  );
+/* ---------------------------------------------------------------- 配置页事件 */
+
+const viewConfig = $("#view-config");
+let lastFormulaInput = null;
+
+viewConfig.addEventListener("click", async (event) => {
+  const addKind = event.target.closest("[data-add-dict]")?.dataset.addDict;
+  if (addKind) {
+    const input = $(`#new-${addKind}`);
+    const label = (input?.value || "").trim();
+    if (!label) return toast("请输入名称", true);
+    try {
+      await api("/api/dicts", { method: "POST", body: { kind: addKind, scope: "both", label } });
+      toast("已添加");
+      await refreshDicts(addKind);
+    } catch (error) {
+      toast(error.message, true);
+    }
+    return;
+  }
+
+  const delId = event.target.closest("[data-del-dict]")?.dataset.delDict;
+  if (delId) {
+    if (!window.confirm("删除这个选项？已录入的记录不受影响。")) return;
+    const column = event.target.closest(".dict-column");
+    const kind = column?.dataset.kind;
+    try {
+      await api(`/api/dicts/${delId}`, { method: "DELETE" });
+      toast("已删除");
+      if (kind) await refreshDicts(kind);
+    } catch (error) {
+      toast(error.message, true);
+    }
+    return;
+  }
+
+  const saveScope = event.target.closest("[data-save-formula]")?.dataset.saveFormula;
+  if (saveScope) {
+    const card = $(".rule-card" + `[data-scope="${saveScope}"]`);
+    const body = {
+      scope: saveScope,
+      volume_formula: card.querySelector('[data-formula="volume_formula"]').value.trim(),
+      amount_formula: card.querySelector('[data-formula="amount_formula"]').value.trim(),
+      amount_decimals: Number(card.querySelector('[data-formula="amount_decimals"]').value),
+    };
+    try {
+      await api("/api/formulas", { method: "PUT", body });
+      state.meta = await api("/api/meta");
+      const saved = $(`[data-saved="${saveScope}"]`);
+      if (saved) saved.textContent = state.meta.formulas[saveScope].amount_formula;
+      toast("规则已保存");
+      computePreview(saveScope);
+    } catch (error) {
+      toast(error.message, true);
+    }
+    return;
+  }
+
+  const resetScope = event.target.closest("[data-reset-formula]")?.dataset.resetFormula;
+  if (resetScope) {
+    const defaults = state.meta.formulaDefaults?.[resetScope];
+    if (!defaults) return toast("没有默认公式", true);
+    const card = $(".rule-card" + `[data-scope="${resetScope}"]`);
+    card.querySelector('[data-formula="amount_formula"]').value = defaults.amount_formula;
+    card.querySelector('[data-formula="volume_formula"]').value = defaults.volume_formula;
+    card.querySelector('[data-formula="amount_decimals"]').value = String(defaults.amount_decimals ?? 2);
+    computePreview(resetScope);
+    toast("已填入默认公式，记得点保存");
+    return;
+  }
+
+  const varName = event.target.closest("[data-var]")?.dataset.var;
+  if (varName) {
+    const card = event.target.closest("[data-scope]");
+    const fallback = card.querySelector('[data-formula="amount_formula"]');
+    const focused = lastFormulaInput && card.contains(lastFormulaInput) ? lastFormulaInput : fallback;
+    insertAtCursor(focused, varName);
+    schedulePreview(card.dataset.scope, 200);
+    return;
+  }
+
+  const delPrice = event.target.closest("[data-del-price]")?.dataset.delPrice;
+  if (delPrice) {
+    if (!window.confirm("删除这条单价？")) return;
+    try {
+      await api(`/api/prices/${delPrice}`, { method: "DELETE" });
+      toast("已删除");
+      state.meta = await api("/api/meta");
+      renderPriceTable();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }
+});
+
+viewConfig.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-formula]");
+  if (!input) return;
+  const card = input.closest("[data-scope]");
+  if (input.dataset.formula === "amount_formula") schedulePreview(card.dataset.scope);
+});
+
+viewConfig.addEventListener("focusin", (event) => {
+  const input = event.target.closest("[data-formula]");
+  if (input) lastFormulaInput = input;
+});
+
+viewConfig.addEventListener("change", (event) => {
+  const control = event.target.closest("[data-preview]");
+  if (!control) return;
+  const scopeKey = control.dataset.previewScope;
+  const field = control.dataset.preview;
+  const sample = previewSample(scopeKey);
+  sample[field] = control.value;
+  computePreview(scopeKey);
+});
+
+viewConfig.addEventListener("submit", async (event) => {
+  if (!event.target.closest("#price-form")) return;
+  event.preventDefault();
+
+  const body = {
+    scope: $("#p-scope").value,
+    customer_name: $("#p-customer").value.trim() || "*",
+    truck_model: $("#p-model").value.trim() || "*",
+    price: Number($("#p-price").value),
+    note: $("#p-note").value.trim(),
+  };
+  if (!Number.isFinite(body.price) || body.price < 0) return toast("单价必须是不小于 0 的数字", true);
+
+  try {
+    await api("/api/prices", { method: "POST", body });
+    toast("单价已保存");
+    $("#p-price").value = "";
+    $("#p-note").value = "";
+    state.meta = await api("/api/meta");
+    renderPriceTable();
+  } catch (error) {
+    toast(error.message, true);
+  }
+});
+
+async function refreshDicts(kind) {
+  state.meta = await api("/api/meta");
+  const column = $(`.dict-column[data-kind="${kind}"]`);
+  if (column) column.outerHTML = dictColumnHtml(kind);
+  const list = $(`datalist#dl-${kind}`);
+  if (list) list.innerHTML = (state.meta.dicts[kind] || []).map((item) => `<option value="${esc(item.label)}"></option>`).join("");
+}
+
+function insertAtCursor(input, text) {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
+  input.focus();
+  input.selectionStart = input.selectionEnd = start + text.length;
 }
 
 /* ---------------------------------------------------------------- 启动 */

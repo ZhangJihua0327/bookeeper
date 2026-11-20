@@ -142,6 +142,10 @@ async function handleApi({ request, response, url, path, method, store, config, 
       }
     }
     const priceIndex = buildPriceIndex(prices);
+    const mergedFormulas = { ...DEFAULT_FORMULAS, ...formulas };
+    // 公式里不出现「单价」时，单价表对金额没有影响，不要再用“金额会变成 0”吓唬用户
+    const usesPrice = SCOPE_KEYS.some((key) => String(mergedFormulas[key]?.amount_formula || "").includes("单价"));
+
     json(response, 200, {
       ok: true,
       data: {
@@ -153,9 +157,11 @@ async function handleApi({ request, response, url, path, method, store, config, 
         })),
         dictKinds: DICT_KINDS,
         dicts: grouped,
-        formulas: { ...DEFAULT_FORMULAS, ...formulas },
+        formulas: mergedFormulas,
+        formulaDefaults: DEFAULT_FORMULAS,
+        usesPrice,
         prices,
-        priceConfigured: SCOPE_KEYS.some((key) => priceIndex.hasPositive(key)),
+        priceConfigured: !usesPrice || SCOPE_KEYS.some((key) => priceIndex.hasPositive(key)),
         variables: FORMULA_VARIABLES,
         functions: FORMULA_FUNCTIONS,
         today: todayInZone(config.timeZone),
