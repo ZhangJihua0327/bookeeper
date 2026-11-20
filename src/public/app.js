@@ -574,11 +574,11 @@ function renderPhoto() {
           <span class="badge">${esc(ocr.model || "qwen3-vl-plus")}</span>
         </div>
 
-        <div class="ocr-drop">
+        <div class="ocr-drop" id="ocr-drop">
           <input type="file" id="ocr-file" accept="image/*" capture="environment" hidden />
           <div class="ocr-drop-body">
             <button class="btn btn-primary" type="button" id="ocr-pick">选择 / 拍摄照片</button>
-            <span class="hint">支持 JPG / PNG；一页一张、尽量正对拍摄，识别更准</span>
+            <span class="hint">支持 JPG / PNG；也可以 <b>Ctrl+V 粘贴截图</b>，或把图片拖进来</span>
           </div>
           <div id="ocr-preview"></div>
         </div>
@@ -622,6 +622,19 @@ function bindPhotoEvents() {
   $("#ocr-file")?.addEventListener("change", handlePhotoFile);
   $("#ocr-run")?.addEventListener("click", runOcr);
   $("#ocr-again")?.addEventListener("click", runOcr);
+
+  const drop = $("#ocr-drop");
+  drop?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    drop.classList.add("is-over");
+  });
+  drop?.addEventListener("dragleave", () => drop.classList.remove("is-over"));
+  drop?.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    drop.classList.remove("is-over");
+    const file = event.dataTransfer?.files?.[0];
+    if (file) await loadPhotoFile(file);
+  });
   $("#ocr-save")?.addEventListener("click", saveDrafts);
   $("#ocr-clear")?.addEventListener("click", () => {
     state.photo = { dataUrl: "", date: "", drafts: [] };
@@ -643,8 +656,35 @@ function renderPhotoPreview() {
 async function handlePhotoFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  if (!String(file.type).startsWith("image/")) {
-    toast("请选择图片文件", true);
+  await loadPhotoFile(file);
+}
+
+/** 粘贴（Ctrl+V）和拖拽都走这里 */
+function imageFromClipboard(data) {
+  if (!data) return null;
+  for (const item of data.items || []) {
+    if (item.kind === "file" && String(item.type).startsWith("image/")) {
+      return item.getAsFile?.() || null;
+    }
+  }
+  return null;
+}
+
+document.addEventListener("paste", async (event) => {
+  if (!state.meta) return;
+  const file = imageFromClipboard(event.clipboardData);
+  if (!file) return;
+  event.preventDefault();
+  if (state.tab !== "photo") switchTab("photo");
+  await loadPhotoFile(file);
+});
+
+async function loadPhotoFile(file) {
+  if (!String(file?.type || "").startsWith("image/")) {
+    toast("请上传图片文件", true);
+    return;
+  }
+  if (state.photo.drafts.length && !window.confirm("当前有未入库的草稿，换成新图片会清空，继续？")) {
     return;
   }
 
@@ -652,6 +692,8 @@ async function handlePhotoFile(event) {
     const status = $("#ocr-status");
     if (status) status.textContent = "正在处理图片…";
     state.photo.dataUrl = await compressImage(file);
+    state.photo.drafts = [];
+    state.photo.date = "";
     renderPhoto();
     const next = $("#ocr-status");
     if (next) next.textContent = "图片已就绪，点「开始识别」";

@@ -569,6 +569,12 @@ body.health-bad {
   border-radius: var(--radius);
   padding: 14px;
   background: var(--panel-2);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ocr-drop.is-over {
+  border-color: var(--brand);
+  background: var(--brand-soft);
 }
 
 .ocr-drop-body {
