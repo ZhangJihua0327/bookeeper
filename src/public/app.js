@@ -1230,25 +1230,46 @@ function renderChart() {
     return;
   }
 
+  // 跨度超过两个月就按月聚合，否则按日（农历年视图下按日会把 9 个月压成 16 根柱子）
+  const spanDays = (Date.parse(rows.at(-1).key) - Date.parse(rows[0].key)) / 86400000;
+  const byMonth = spanDays > 62;
+  const list = byMonth ? monthBuckets(rows) : rows.slice(-16);
+
   const metric = state.chartMetric;
   const pick = (row) => (metric === "amount" ? row.amount : row.volume);
-  const list = rows.slice(-16);
   const max = Math.max(...list.map(pick), 1);
+  const label = (row) => (byMonth ? `${Number(row.key.slice(5, 7))}月` : row.key.slice(5));
 
   wrap.innerHTML = `
+    <div class="chart-caption">${byMonth ? "按月" : "按日"}${metric === "amount" ? "金额" : "方量"}${
+      byMonth ? `（最近 ${list.length} 个月）` : ""
+    }</div>
     <div class="chart-bars">
       ${list
         .map((row) => {
-          const height = Math.max(2, (pick(row) / max) * 100);
+          const height = Math.max(4, (pick(row) / max) * 100);
           return `<div class="chart-col" title="${esc(row.key)}：${fmt(row.volume, 3)} 方 · ${fmt(row.amount)} 元">
             <span class="chart-value">${metric === "amount" ? fmt(row.amount) : fmt(row.volume, 1)}</span>
             <span class="chart-bar" style="height:${height.toFixed(1)}%"></span>
-            <span class="chart-x">${esc(row.key.slice(5))}</span>
+            <span class="chart-x">${esc(label(row))}</span>
           </div>`;
         })
         .join("")}
     </div>
   `;
+}
+
+function monthBuckets(rows) {
+  const buckets = new Map();
+  for (const row of rows) {
+    const key = row.key.slice(0, 7);
+    const current = buckets.get(key) || { key, count: 0, volume: 0, amount: 0 };
+    current.count += row.count;
+    current.volume += row.volume;
+    current.amount += row.amount;
+    buckets.set(key, current);
+  }
+  return [...buckets.values()].slice(-12);
 }
 
 function renderGroupTable() {
