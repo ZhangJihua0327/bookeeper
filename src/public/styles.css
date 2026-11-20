@@ -967,6 +967,19 @@ table.table {
   color: var(--muted);
 }
 
+.day-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.day-count {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---------------------------------------------------------------- 录入 */
 
 .entry-tools {
@@ -1797,6 +1810,19 @@ table.table {
   }
   .filter-row .field.grow {
     flex: 1 1 100%;
+  }
+  .quick-dates {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .quick-dates button {
+    flex: 1 1 auto;
+    white-space: nowrap;
+    padding: 6px 8px;
+  }
+  .day-nav {
+    width: 100%;
+    justify-content: space-between;
   }
   .table tbody td,
   .table thead th {

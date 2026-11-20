@@ -128,6 +128,8 @@ export class MemoryStore {
       );
     }
     rows.sort((a, b) => (a.entry_date < b.entry_date ? 1 : a.entry_date > b.entry_date ? -1 : b.id - a.id));
+    // 和 MysqlStore 一样支持 limit，避免本地预览一次返回全表
+    if (Number(filter.limit) > 0) rows = rows.slice(0, Number(filter.limit));
     return rows.map((row) => ({ ...row }));
   }
 

@@ -9,7 +9,6 @@ const state = {
   dashboard: null,
   boardInitialized: false,
   page: 1,
-  pageSize: 20,
   groupBy: "customer",
   chartMetric: "volume",
   recent: [],
@@ -1163,6 +1162,18 @@ function renderBoardBody() {
       .map((text) => `<div class="card card-tight"><div class="notice"><div class="notice-body">${esc(text)}</div></div></div>`)
       .join("")}
 
+    <div class="card card-tight">
+      <div class="card-head">
+        <div>
+          <h2 class="card-title">明细</h2>
+          <p class="card-desc" id="detail-desc">按天翻页</p>
+        </div>
+        <div class="spacer"></div>
+        <div class="day-nav" id="day-nav"></div>
+      </div>
+      <div id="detail-table"></div>
+    </div>
+
     <div class="card">
       <div class="card-head">
         <div><h2 class="card-title">汇总</h2><p class="card-desc">按客户 / 车型 / 日期 / 表汇总方量与金额</p></div>
@@ -1191,14 +1202,6 @@ function renderBoardBody() {
       </div>
       <div id="chart"></div>
       <div id="group-table"></div>
-    </div>
-
-    <div class="card card-tight">
-      <div class="card-head">
-        <div><h2 class="card-title">明细</h2><p class="card-desc">共 ${data.rows.length} 条，点“编辑”可到录入页修改</p></div>
-      </div>
-      <div id="detail-table"></div>
-      <div class="pagination" id="pagination"></div>
     </div>
   `;
 
@@ -1323,19 +1326,49 @@ function renderGroupTable() {
     : `<div class="empty">当前筛选条件下没有数据</div>`;
 }
 
+function dayGroups(rows) {
+  const groups = [];
+  let current = null;
+  for (const row of rows) {
+    const key = row.entry_date || "未填日期";
+    if (!current || current.key !== key) {
+      current = { key, rows: [] };
+      groups.push(current);
+    }
+    current.rows.push(row);
+  }
+  return groups;
+}
+
 function renderDetailTable() {
   const data = state.dashboard;
-  const rows = data.rows;
-  const pages = Math.max(1, Math.ceil(rows.length / state.pageSize));
-  if (state.page > pages) state.page = pages;
-  const start = (state.page - 1) * state.pageSize;
-  const slice = rows.slice(start, start + state.pageSize);
+  const days = dayGroups(data.rows || []);
+  const totalPages = Math.max(1, days.length);
+  if (state.page > totalPages) state.page = totalPages;
+  if (state.page < 1) state.page = 1;
+
+  const day = days[state.page - 1];
+  const slice = day ? day.rows : [];
+  const totalCount = (data.rows || []).length;
+
+  const desc = $("#detail-desc");
+  if (desc) {
+    if (!days.length) {
+      desc.innerHTML = "当前筛选条件下没有数据";
+    } else {
+      const dayVolume = slice.reduce((sum, row) => sum + (Number(row.volume) || 0), 0);
+      const dayAmount = slice.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+      desc.innerHTML = `<b>${esc(day.key)}</b> · ${slice.length} 条 · ${fmt(dayVolume, 2)} 方 · ${fmt(
+        dayAmount,
+      )} 元 <span class="muted">（共 ${totalCount} 条 / ${days.length} 天）</span>`;
+    }
+  }
 
   $("#detail-table").innerHTML = slice.length
     ? `<div class="table-wrap list-table-wrap">
         <table class="table">
           <thead><tr>
-            <th>日期</th><th>表</th><th>车型</th><th>客户名称</th><th class="num">方量</th>
+            <th>表</th><th>车型</th><th>客户名称</th><th class="num">方量</th>
             <th class="num">金额</th><th>备注</th><th class="num col-actions">操作</th>
           </tr></thead>
           <tbody>
@@ -1343,7 +1376,6 @@ function renderDetailTable() {
               .map(
                 (row) => `
               <tr>
-                <td>${esc(row.entry_date)}</td>
                 <td><span class="badge badge-${row.scope === "pump" ? "pump" : "mixer"}">${esc(row.scope_label)}</span></td>
                 <td>${esc(row.truck_model) || "—"}</td>
                 <td class="strong">${esc(row.customer_name)}</td>
@@ -1377,9 +1409,7 @@ function renderDetailTable() {
             <div class="mob-side"><span class="mob-amount">${
               row.amount_error ? "错误" : fmt(row.amount)
             }<small>元</small></span></div>
-            <div class="mob-sub">${esc(row.entry_date)} · ${fmt(row.volume, 2)} 方${
-              row.remark ? ` · ${esc(row.remark)}` : ""
-            }</div>
+            <div class="mob-sub">${fmt(row.volume, 2)} 方${row.remark ? ` · ${esc(row.remark)}` : ""}</div>
             <div class="mob-actions">
               <button class="btn btn-sm" type="button" data-edit="${row.id}">编辑</button>
               <button class="btn btn-sm btn-danger" type="button" data-delete="${row.id}">删除</button>
@@ -1390,14 +1420,13 @@ function renderDetailTable() {
       </div>`
     : `<div class="empty">当前筛选条件下没有数据</div>`;
 
-  const pagination = $("#pagination");
-  if (pagination) {
-    pagination.innerHTML =
-      rows.length === 0
-        ? ""
-        : `<span>第 ${state.page} / ${pages} 页 · 共 ${rows.length} 条</span>
-           <button class="btn btn-sm" type="button" data-page="prev" ${state.page <= 1 ? "disabled" : ""}>上一页</button>
-           <button class="btn btn-sm" type="button" data-page="next" ${state.page >= pages ? "disabled" : ""}>下一页</button>`;
+  const nav = $("#day-nav");
+  if (nav) {
+    nav.innerHTML = days.length
+      ? `<span class="day-count">第 ${state.page} / ${days.length} 天</span>
+         <button class="btn btn-sm" type="button" data-page="prev" ${state.page <= 1 ? "disabled" : ""}>上一天</button>
+         <button class="btn btn-sm" type="button" data-page="next" ${state.page >= totalPages ? "disabled" : ""}>下一天</button>`
+      : "";
   }
 }
 
