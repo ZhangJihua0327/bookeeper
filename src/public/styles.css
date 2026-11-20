@@ -734,6 +734,11 @@ body.health-bad {
   max-height: 480px;
 }
 
+/* 明细/汇总/最近记录按天翻页后一页就是一整天的量，不再内部滚动，直接展开 */
+.list-table-wrap {
+  max-height: none;
+}
+
 table.table {
   width: 100%;
   border-collapse: separate;
