@@ -35,7 +35,7 @@ test("normalizeOcrResult 归一化字段并过滤脏数据", () => {
     {
       date: "2026-11-18",
       entries: [
-        { table: "pump", customer: " 贾建 ", volume: "35", note: "垫层", confidence: 0.9 },
+        { table: "pump", customer: " 贾建 ", truck_model: "二号", volume: "35", note: "垫层", confidence: 0.9 },
         { table: "mixer", customer: "朱水波", volume: 52, note: "12×3 姜，8×2 薛" },
         { table: "unknown", customer: "x", volume: 1 },
         { table: "pump", customer: "", volume: 0 },
@@ -48,6 +48,7 @@ test("normalizeOcrResult 归一化字段并过滤脏数据", () => {
   assert.equal(result.date, "2026-11-18");
   assert.equal(result.entries.length, 3);
   assert.equal(result.entries[0].customer, "贾建");
+  assert.equal(result.entries[0].truck_model, "二号");
   assert.equal(result.entries[0].volume, 35);
   assert.equal(result.entries[0].confidence, 0.9);
   assert.equal(result.entries[1].confidence, null);

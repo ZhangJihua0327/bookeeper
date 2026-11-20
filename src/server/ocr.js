@@ -31,6 +31,7 @@ ${modelHint}
     {
       "table": "pump" 或 "mixer",
       "customer": "客户名称",
+      "truck_model": "车型，行里写了就填（如 二号）；没写就留空字符串",
       "volume": 数字,
       "note": "泵车填施工地点；搅拌车填原始算式，例如 12×3 姜",
       "raw": "该行原文的抄录",
@@ -107,6 +108,7 @@ export function normalizeOcrResult(raw, { today = "" } = {}) {
     entries.push({
       table,
       customer,
+      truck_model: String(item?.truck_model ?? "").trim().slice(0, 64),
       volume: volumeValue,
       note,
       raw: String(item?.raw ?? "").trim().slice(0, 255),

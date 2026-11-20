@@ -623,6 +623,7 @@ function renderPhoto() {
         <div id="archive-grid" class="photo-grid"><div class="empty">加载中…</div></div>
       </div>
     </div>
+    ${datalistsHtml()}
   `;
 
   bindPhotoEvents();
@@ -776,7 +777,7 @@ function renderDrafts() {
     <div class="table-wrap">
       <table class="table">
         <thead><tr>
-          <th>表</th><th>客户名称</th><th class="num">方量</th><th>备注</th>
+          <th>表</th><th>客户名称</th><th>车型</th><th class="num">方量</th><th>备注</th>
           <th>原文</th><th>置信</th><th class="num">操作</th>
         </tr></thead>
         <tbody>
@@ -791,6 +792,9 @@ function renderDrafts() {
                 </select>
               </td>
               <td><input type="text" data-idx="${index}" data-field="customer" value="${esc(draft.customer)}" /></td>
+              <td><input type="text" list="dl-truck_model" data-idx="${index}" data-field="truck_model" value="${esc(
+                draft.truck_model || "",
+              )}" placeholder="如 二号" /></td>
               <td><input type="number" step="0.001" min="0" data-idx="${index}" data-field="volume" value="${esc(
                 draft.volume,
               )}" /></td>
@@ -907,6 +911,12 @@ async function saveDrafts() {
     return;
   }
 
+  const missingModel = drafts.filter((draft) => draft.table === "pump" && !String(draft.truck_model || "").trim());
+  if (missingModel.length) {
+    toast(`有 ${missingModel.length} 行泵车没填车型（必填），补一下再入库`, true);
+    return;
+  }
+
   const button = $("#ocr-save");
   if (button) button.disabled = true;
 
@@ -920,9 +930,9 @@ async function saveDrafts() {
           scope: draft.table,
           entry_date: date,
           customer_name: draft.customer.trim(),
+          truck_model: String(draft.truck_model || "").trim(),
           volume: Number(draft.volume),
           remark: draft.note.trim(),
-          truck_model: "",
         },
       });
       saved += 1;
