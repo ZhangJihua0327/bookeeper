@@ -21,6 +21,7 @@ import {
 } from "./formula.js";
 import { buildPriceIndex } from "./prices.js";
 import { lunarYearInfo } from "./lunar.js";
+import { sortRecords } from "./order.js";
 import { DEFAULT_OCR_MODEL, recognizeLedger } from "./ocr.js";
 import { DICT_KINDS, formatDate, isScope, SCOPE_KEYS, SCOPES, scopeDef, toFormulaValues } from "./scopes.js";
 import { DEFAULT_FORMULAS } from "./seed.js";
@@ -472,7 +473,8 @@ async function loadContext(store, filters) {
     formulas: { ...DEFAULT_FORMULAS, ...formulas },
     prices,
     priceIndex: buildPriceIndex(prices),
-    records,
+    // 统一在这里排序：明细、最近记录、CSV 导出顺序一致
+    records: sortRecords(records),
   };
 }
 

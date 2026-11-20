@@ -357,3 +357,30 @@ test("未填日期的存量记录不会让看板报错", async () => {
   assert.equal(ranged.status, 200);
   assert.equal(ranged.json.data.rows.some((row) => row.customer_name === "高飞"), false);
 });
+
+test("同一天按车型字面顺序排列，没填车型的排当天最后", async () => {
+  const date = "2026-10-05";
+  for (const model of ["三号", "一号", "二号"]) {
+    const res = await request("/api/records", {
+      method: "POST",
+      body: { scope: "pump", entry_date: date, truck_model: model, customer_name: "排序测试", volume: 10 },
+    });
+    assert.equal(res.status, 201);
+  }
+  const mixer = await request("/api/records", {
+    method: "POST",
+    body: { scope: "mixer", entry_date: date, customer_name: "排序测试", volume: 12, remark: "12" },
+  });
+  assert.equal(mixer.status, 201);
+
+  const list = await request(`/api/records?from=${date}&to=${date}`);
+  const models = list.json.data.rows.map((row) => row.truck_model || "");
+  // 字面（码位）顺序：一(4E00) < 三(4E09) < 二(4E8C)，搅拌车不填车型所以垫底
+  assert.deepEqual(models, ["一号", "三号", "二号", ""]);
+
+  const board = await request(`/api/dashboard?from=${date}&to=${date}`);
+  assert.deepEqual(
+    board.json.data.rows.map((row) => row.truck_model || ""),
+    ["一号", "三号", "二号", ""],
+  );
+});
