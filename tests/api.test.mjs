@@ -99,6 +99,11 @@ test("meta 返回两张表的列、字典与公式", async () => {
   assert.equal(data.formulas.mixer.volume_formula, "算式(备注)");
   assert.ok(data.dicts.customer.length >= 6);
   assert.equal(data.priceConfigured, true);
+  // 看板默认按农历年统计，区间起点由服务端给出
+  assert.match(data.lunar.start, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(data.lunar.year, Number(data.lunar.start.slice(0, 4)));
+  assert.match(data.lunar.label, /^农历[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]年$/);
+  assert.ok(data.lunar.start <= data.today);
 });
 
 test("新增泵车记录：按公式算金额", async () => {

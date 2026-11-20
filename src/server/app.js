@@ -20,6 +20,7 @@ import {
   parseFormula,
 } from "./formula.js";
 import { buildPriceIndex } from "./prices.js";
+import { lunarYearInfo } from "./lunar.js";
 import { DEFAULT_OCR_MODEL, recognizeLedger } from "./ocr.js";
 import { DICT_KINDS, formatDate, isScope, SCOPE_KEYS, SCOPES, scopeDef, toFormulaValues } from "./scopes.js";
 import { DEFAULT_FORMULAS } from "./seed.js";
@@ -145,6 +146,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
     const mergedFormulas = { ...DEFAULT_FORMULAS, ...formulas };
     // 公式里不出现「单价」时，单价表对金额没有影响，不要再用“金额会变成 0”吓唬用户
     const usesPrice = SCOPE_KEYS.some((key) => String(mergedFormulas[key]?.amount_formula || "").includes("单价"));
+    const today = todayInZone(config.timeZone);
 
     json(response, 200, {
       ok: true,
@@ -164,7 +166,8 @@ async function handleApi({ request, response, url, path, method, store, config, 
         priceConfigured: !usesPrice || SCOPE_KEYS.some((key) => priceIndex.hasPositive(key)),
         variables: FORMULA_VARIABLES,
         functions: FORMULA_FUNCTIONS,
-        today: todayInZone(config.timeZone),
+        today,
+        lunar: lunarYearInfo(today),
         ocr: { enabled: Boolean(config.dashscope?.apiKey), model: config.dashscope?.model || DEFAULT_OCR_MODEL },
       },
     });

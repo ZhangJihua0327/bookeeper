@@ -960,13 +960,18 @@ function defaultFilters() {
   const today = state.meta.today;
   return {
     scope: "all",
-    from: `${today.slice(0, 8)}01`,
+    from: lunarStartDate() || `${today.slice(0, 8)}01`,
     to: today,
     customer: "",
     model: "",
     q: "",
-    quick: "month",
+    quick: "lunarYear",
   };
+}
+
+/** 当前农历年正月初一（由服务端按 ICU 中国历算出），拿不到就退回今年 1 月 1 日 */
+function lunarStartDate() {
+  return state.meta?.lunar?.start || "";
 }
 
 function applyQuick(quick) {
@@ -976,7 +981,8 @@ function applyQuick(quick) {
     state.filters.to = to;
   };
 
-  if (quick === "today") set(today, today);
+  if (quick === "lunarYear") set(lunarStartDate() || `${today.slice(0, 4)}-01-01`, today);
+  else if (quick === "today") set(today, today);
   else if (quick === "yesterday") {
     const yesterday = shiftDate(today, -1);
     set(yesterday, yesterday);
@@ -994,7 +1000,7 @@ function applyQuick(quick) {
 
 function renderBoard() {
   if (!state.boardInitialized) {
-    applyQuick("month");
+    applyQuick("lunarYear");
     state.boardInitialized = true;
   }
 
@@ -1015,11 +1021,12 @@ function renderBoard() {
           <div class="filter-row">
             <div class="quick-dates" id="quick-dates">
               ${[
-                ["today", "今天"],
-                ["yesterday", "昨天"],
-                ["week", "近7天"],
+                ["lunarYear", state.meta.lunar ? "农历年" : "今年"],
                 ["month", "本月"],
                 ["lastMonth", "上月"],
+                ["week", "近7天"],
+                ["today", "今天"],
+                ["yesterday", "昨天"],
                 ["all", "全部"],
               ]
                 .map(
@@ -1203,8 +1210,12 @@ function renderBoardBody() {
 }
 
 function rangeLabel() {
-  const { from, to } = state.filters;
+  const { from, to, quick } = state.filters;
+  const lunar = state.meta?.lunar;
   if (!from && !to) return "全部时间";
+  if (quick === "lunarYear" && lunar) {
+    return `${lunar.label}（${lunar.zodiac}）· ${from} 起`; // 例如「农历丙午年（马）· 2026-02-17 起」
+  }
   if (from === to) return from;
   return `${from || "开始"} ~ ${to || "今天"}`;
 }
