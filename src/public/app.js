@@ -11,6 +11,7 @@ const state = {
   page: 1,
   pageSize: 20,
   groupBy: "customer",
+  photo: { dataUrl: "", date: "", drafts: [] },
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -141,6 +142,7 @@ function switchTab(tab) {
   state.tab = tab;
   $$(".tab").forEach((node) => node.classList.toggle("is-active", node.dataset.tab === tab));
   $("#view-entry").classList.toggle("hidden", tab !== "entry");
+  $("#view-photo").classList.toggle("hidden", tab !== "photo");
   $("#view-board").classList.toggle("hidden", tab !== "board");
   $("#view-config").classList.toggle("hidden", tab !== "config");
 
@@ -149,6 +151,7 @@ function switchTab(tab) {
   }
 
   if (tab === "entry") renderEntry();
+  if (tab === "photo") renderPhoto();
   if (tab === "board") renderBoard();
   if (tab === "config") renderConfig();
 }
@@ -543,6 +546,281 @@ async function deleteRecord(id, after) {
   } catch (error) {
     toast(error.message, true);
   }
+}
+
+/* ---------------------------------------------------------------- 拍照录入页 */
+
+function renderPhoto() {
+  const ocr = state.meta.ocr || {};
+  const photo = state.photo;
+  const hasDrafts = photo.drafts.length > 0;
+
+  $("#view-photo").innerHTML = `
+    <div class="stack">
+      ${
+        ocr.enabled
+          ? ""
+          : `<div class="card card-tight"><div class="notice"><div class="notice-body">
+               服务端还没有配置 <code>DASHSCOPE_API_KEY</code>，拍照识别暂时不可用。
+             </div></div></div>`
+      }
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">拍照入账</h2>
+            <p class="card-desc">上传手写台账照片，AI 先识别成草稿，你核对修改后再入库——识别结果不会直接写库。</p>
+          </div>
+          <div class="spacer"></div>
+          <span class="badge">${esc(ocr.model || "qwen3-vl-plus")}</span>
+        </div>
+
+        <div class="ocr-drop">
+          <input type="file" id="ocr-file" accept="image/*" capture="environment" hidden />
+          <div class="ocr-drop-body">
+            <button class="btn btn-primary" type="button" id="ocr-pick">选择 / 拍摄照片</button>
+            <span class="hint">支持 JPG / PNG；一页一张、尽量正对拍摄，识别更准</span>
+          </div>
+          <div id="ocr-preview"></div>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn btn-primary" type="button" id="ocr-run" ${photo.dataUrl && ocr.enabled ? "" : "disabled"}>开始识别</button>
+          <span class="hint" id="ocr-status"></span>
+        </div>
+      </div>
+
+      <div class="card" id="ocr-result-card" ${hasDrafts ? "" : "hidden"}>
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">识别草稿</h2>
+            <p class="card-desc">逐行核对：表、客户、方量、备注都能直接改；确认无误再入库</p>
+          </div>
+          <div class="spacer"></div>
+          <label class="field" style="width:168px"><span>日期</span><input type="date" id="ocr-date" value="${esc(
+            photo.date || state.meta.today,
+          )}" /></label>
+        </div>
+        <div id="ocr-table"></div>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="button" id="ocr-save">确认入库</button>
+          <button class="btn" type="button" id="ocr-clear">清空</button>
+          <span class="spacer"></span>
+          <span class="hint">共 ${photo.drafts.length} 条</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  bindPhotoEvents();
+  renderPhotoPreview();
+  renderDrafts();
+}
+
+function bindPhotoEvents() {
+  $("#ocr-pick")?.addEventListener("click", () => $("#ocr-file")?.click());
+  $("#ocr-file")?.addEventListener("change", handlePhotoFile);
+  $("#ocr-run")?.addEventListener("click", runOcr);
+  $("#ocr-save")?.addEventListener("click", saveDrafts);
+  $("#ocr-clear")?.addEventListener("click", () => {
+    state.photo = { dataUrl: "", date: "", drafts: [] };
+    renderPhoto();
+  });
+  $("#ocr-date")?.addEventListener("change", (event) => {
+    state.photo.date = event.target.value;
+  });
+}
+
+function renderPhotoPreview() {
+  const wrap = $("#ocr-preview");
+  if (!wrap) return;
+  wrap.innerHTML = state.photo.dataUrl
+    ? `<img class="ocr-preview-img" alt="待识别照片" src="${state.photo.dataUrl}" />`
+    : "";
+}
+
+async function handlePhotoFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!String(file.type).startsWith("image/")) {
+    toast("请选择图片文件", true);
+    return;
+  }
+
+  try {
+    const status = $("#ocr-status");
+    if (status) status.textContent = "正在处理图片…";
+    state.photo.dataUrl = await compressImage(file);
+    renderPhoto();
+    const next = $("#ocr-status");
+    if (next) next.textContent = "图片已就绪，点「开始识别」";
+  } catch (error) {
+    toast(error.message || "图片处理失败", true);
+  }
+}
+
+async function compressImage(file, maxSide = 1600, quality = 0.85) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("读取图片失败"));
+    reader.readAsDataURL(file);
+  });
+
+  const image = await new Promise((resolve, reject) => {
+    const element = new window.Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error("无法解析这张图片"));
+    element.src = dataUrl;
+  });
+
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+  if (scale === 1 && dataUrl.length < 1_500_000) return dataUrl;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function runOcr() {
+  if (!state.photo.dataUrl) return;
+
+  const status = $("#ocr-status");
+  const button = $("#ocr-run");
+  if (button) button.disabled = true;
+  if (status) status.textContent = "识别中，通常 15–40 秒…";
+
+  try {
+    const result = await api("/api/ocr", { method: "POST", body: { image: state.photo.dataUrl } });
+    state.photo.date = result.date || state.meta.today;
+    state.photo.drafts = result.entries || [];
+    renderPhoto();
+    toast(`识别到 ${state.photo.drafts.length} 条，请核对`);
+  } catch (error) {
+    toast(error.message, true);
+    if (status) status.textContent = "";
+    if (button) button.disabled = false;
+  }
+}
+
+function renderDrafts() {
+  const wrap = $("#ocr-table");
+  if (!wrap) return;
+
+  const drafts = state.photo.drafts;
+  if (!drafts.length) {
+    wrap.innerHTML = `<div class="empty">还没有识别结果</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr>
+          <th>表</th><th>客户名称</th><th class="num">方量</th><th>备注</th>
+          <th>原文</th><th>置信</th><th class="num">操作</th>
+        </tr></thead>
+        <tbody>
+          ${drafts
+            .map(
+              (draft, index) => `
+            <tr>
+              <td>
+                <select data-idx="${index}" data-field="table">
+                  <option value="pump"${draft.table === "pump" ? " selected" : ""}>泵车</option>
+                  <option value="mixer"${draft.table === "mixer" ? " selected" : ""}>搅拌车</option>
+                </select>
+              </td>
+              <td><input type="text" data-idx="${index}" data-field="customer" value="${esc(draft.customer)}" /></td>
+              <td><input type="number" step="0.001" min="0" data-idx="${index}" data-field="volume" value="${esc(
+                draft.volume,
+              )}" /></td>
+              <td><input type="text" data-idx="${index}" data-field="note" value="${esc(draft.note)}" /></td>
+              <td class="wrap muted">${esc(draft.raw) || "—"}</td>
+              <td>${confidenceBadge(draft)}</td>
+              <td><div class="row-actions"><button class="btn btn-sm btn-danger" type="button" data-del="${index}">删除</button></div></td>
+            </tr>`,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  $$("[data-idx]", wrap).forEach((input) => {
+    input.addEventListener("input", () => {
+      const index = Number(input.dataset.idx);
+      const field = input.dataset.field;
+      state.photo.drafts[index][field] = field === "volume" ? Number(input.value) : input.value;
+    });
+    input.addEventListener("change", () => {
+      const index = Number(input.dataset.idx);
+      const field = input.dataset.field;
+      state.photo.drafts[index][field] = field === "volume" ? Number(input.value) : input.value;
+    });
+  });
+
+  $$("[data-del]", wrap).forEach((button) =>
+    button.addEventListener("click", () => {
+      state.photo.drafts.splice(Number(button.dataset.del), 1);
+      renderDrafts();
+      const card = $("#ocr-result-card");
+      if (card && !state.photo.drafts.length) card.hidden = true;
+    }),
+  );
+}
+
+function confidenceBadge(draft) {
+  if (draft.confidence === null || draft.confidence === undefined) return `<span class="badge">—</span>`;
+  const percent = Math.round(draft.confidence * 100);
+  const tone = draft.confidence >= 0.9 ? "badge-ok" : draft.confidence >= 0.7 ? "badge-warn" : "badge-danger";
+  const title = draft.uncertain?.length ? ` title="不确定：${esc(draft.uncertain.join("、"))}"` : "";
+  return `<span class="badge ${tone}"${title}>${percent}%</span>`;
+}
+
+async function saveDrafts() {
+  const date = $("#ocr-date")?.value || state.meta.today;
+  const drafts = state.photo.drafts.filter((draft) => draft.customer.trim() && Number(draft.volume) > 0);
+  if (!drafts.length) {
+    toast("没有可入库的行（客户和方量都要有值）", true);
+    return;
+  }
+
+  const button = $("#ocr-save");
+  if (button) button.disabled = true;
+
+  let saved = 0;
+  const errors = [];
+  for (const draft of drafts) {
+    try {
+      await api("/api/records", {
+        method: "POST",
+        body: {
+          scope: draft.table,
+          entry_date: date,
+          customer_name: draft.customer.trim(),
+          volume: Number(draft.volume),
+          remark: draft.note.trim(),
+          truck_model: "",
+        },
+      });
+      saved += 1;
+    } catch (error) {
+      errors.push(`${draft.customer}：${error.message}`);
+    }
+  }
+
+  if (button) button.disabled = false;
+
+  if (errors.length) {
+    toast(`已入库 ${saved} 条，失败 ${errors.length} 条：${errors[0]}`, true);
+    return;
+  }
+
+  toast(`已入库 ${saved} 条`);
+  state.photo = { dataUrl: "", date: "", drafts: [] };
+  renderPhoto();
 }
 
 /* ---------------------------------------------------------------- 看板 */

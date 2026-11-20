@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
+import { DEFAULT_OCR_MODEL } from "./ocr.js";
+
 loadDotEnv();
 
 const env = process.env;
@@ -22,6 +24,12 @@ export const config = {
     user: env.DB_USER || "bookeeper",
     password: env.DB_PASSWORD || "",
     connectionLimit: int(env.DB_POOL_SIZE, 8),
+  },
+  // 拍照识别（阿里云百炼 DashScope 视觉模型）
+  dashscope: {
+    apiKey: env.DASHSCOPE_API_KEY || "",
+    model: env.DASHSCOPE_VL_MODEL || DEFAULT_OCR_MODEL,
+    timeoutMs: int(env.DASHSCOPE_TIMEOUT_MS, 120000),
   },
 };
 

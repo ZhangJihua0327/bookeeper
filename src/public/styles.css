@@ -562,6 +562,31 @@ body.health-bad {
   background: #fdf3f3;
 }
 
+/* ---------- 拍照录入 ---------- */
+
+.ocr-drop {
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--panel-2);
+}
+
+.ocr-drop-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ocr-preview-img {
+  display: block;
+  margin-top: 12px;
+  max-width: 100%;
+  max-height: 340px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
 /* ---------- 筛选栏 ---------- */
 
 .filter-bar {

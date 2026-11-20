@@ -20,6 +20,7 @@ import {
   parseFormula,
 } from "./formula.js";
 import { buildPriceIndex } from "./prices.js";
+import { DEFAULT_OCR_MODEL, recognizeLedger } from "./ocr.js";
 import { DICT_KINDS, formatDate, isScope, SCOPE_KEYS, SCOPES, scopeDef, toFormulaValues } from "./scopes.js";
 import { DEFAULT_FORMULAS } from "./seed.js";
 
@@ -158,6 +159,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
         variables: FORMULA_VARIABLES,
         functions: FORMULA_FUNCTIONS,
         today: todayInZone(config.timeZone),
+        ocr: { enabled: Boolean(config.dashscope?.apiKey), model: config.dashscope?.model || DEFAULT_OCR_MODEL },
       },
     });
     return;
@@ -190,6 +192,43 @@ async function handleApi({ request, response, url, path, method, store, config, 
       "Cache-Control": "no-store",
     });
     response.end("\uFEFF" + csv);
+    return;
+  }
+
+  if (method === "POST" && path === "/api/ocr") {
+    if (!config.dashscope?.apiKey) {
+      throw new HttpError(503, "服务端没有配置 DASHSCOPE_API_KEY，无法识别图片");
+    }
+
+    const body = await readJson(request, 8 * 1024 * 1024);
+    const image = String(body.image || "");
+    const match = /^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(image);
+    if (!match) throw new HttpError(400, "请上传 JPEG / PNG / WebP 图片");
+
+    const bytes = Buffer.from(match[2], "base64");
+    if (!bytes.length) throw new HttpError(400, "图片内容为空");
+    if (bytes.length > 6 * 1024 * 1024) throw new HttpError(413, "图片过大（上限 6MB），请压缩后重试");
+
+    const dicts = await store.listDicts();
+    let result;
+    try {
+      result = await recognizeLedger({
+        apiKey: config.dashscope.apiKey,
+        model: config.dashscope.model,
+        imageDataUrl: image,
+        dicts: {
+          customers: dicts.filter((item) => item.kind === "customer").map((item) => item.label),
+          truckModels: dicts.filter((item) => item.kind === "truck_model").map((item) => item.label),
+        },
+        today: todayInZone(config.timeZone),
+        timeoutMs: config.dashscope.timeoutMs,
+      });
+    } catch (error) {
+      logger.error?.("[ocr] 识别失败", error?.message || error);
+      throw new HttpError(502, `识别失败：${error.message || error}`);
+    }
+
+    json(response, 200, { ok: true, data: { ...result, model: config.dashscope.model } });
     return;
   }
 
@@ -675,13 +714,13 @@ function clientKey(request) {
   );
 }
 
-async function readJson(request) {
+async function readJson(request, limit = BODY_LIMIT) {
   const chunks = [];
   let size = 0;
 
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > BODY_LIMIT) throw new HttpError(413, "请求体过大");
+    if (size > limit) throw new HttpError(413, "请求体过大");
     chunks.push(chunk);
   }
 

@@ -11,6 +11,7 @@ const config = {
   sessionSecret: "test-secret-key",
   sessionTtlMs: 60 * 60 * 1000,
   timeZone: "Asia/Shanghai",
+  dashscope: { apiKey: "", model: "qwen3-vl-plus", timeoutMs: 1000 },
 };
 
 const silentLog = { info() {}, warn() {}, error() {} };
