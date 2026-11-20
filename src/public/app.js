@@ -205,17 +205,6 @@ function rowIsEmpty(row) {
   return !row.id && !row.customer_name.trim() && String(row.volume).trim() === "" && !row.remark.trim();
 }
 
-function datalistsHtml() {
-  return ["customer", "truck_model"]
-    .map((kind) => {
-      const options = (state.meta.dicts[kind] || [])
-        .map((item) => `<option value="${esc(item.label)}"></option>`)
-        .join("");
-      return `<datalist id="dl-${kind}">${options}</datalist>`;
-    })
-    .join("");
-}
-
 function renderEntry() {
   if (!state.entry.rows.length) state.entry.rows = [makeRow()];
 
@@ -279,7 +268,6 @@ function renderEntry() {
         <div id="recent-wrap"><div class="empty">加载中…</div></div>
       </div>
     </div>
-    ${datalistsHtml()}
   `;
 
   renderRows();
@@ -353,12 +341,12 @@ function rowHtml(row) {
         </select>
       </td>
       <td class="cell-customer" data-label="客户">
-        <input type="text" list="dl-customer" data-uid="${row.uid}" data-field="customer_name" value="${esc(
+        <input type="text" data-dict="customer" data-uid="${row.uid}" data-field="customer_name" value="${esc(
           row.customer_name,
         )}" placeholder="客户名称" />${flag}
       </td>
       <td data-label="车型">
-        <input type="text" list="dl-truck_model" data-uid="${row.uid}" data-field="truck_model" value="${esc(
+        <input type="text" data-dict="truck_model" data-uid="${row.uid}" data-field="truck_model" value="${esc(
           row.truck_model,
         )}" placeholder="${modelRequired ? "必填，如 二号" : "选填"}" />
       </td>
@@ -713,6 +701,181 @@ async function deleteRecord(id, after) {
     toast(error.message, true);
   }
 }
+
+/* ---------------------------------------------------------------- 名称候选 */
+
+/**
+ * 客户 / 车型的候选列表（替代原生 datalist）：
+ * - 刚聚焦时列出**全部**候选，不管框里已经有什么字；
+ * - 一旦开始输入，就按框里的内容筛选；
+ * - 清空内容回到全部；也可以不选，直接打新的名字。
+ */
+
+let suggestNode = null;
+let suggestInput = null;
+let suggestItems = [];
+let suggestIndex = -1;
+let suggestQuery = "";
+let suggestApplying = false;
+
+function suggestOptions(kind) {
+  return (state.meta?.dicts?.[kind] || []).map((item) => item.label);
+}
+
+function ensureSuggestNode() {
+  if (suggestNode) return suggestNode;
+
+  suggestNode = document.createElement("div");
+  suggestNode.className = "suggest hidden";
+  // mousedown 先兜住，点候选时输入框不会失焦
+  suggestNode.addEventListener("mousedown", (event) => event.preventDefault());
+  suggestNode.addEventListener("click", (event) => {
+    const item = event.target.closest(".suggest-item");
+    if (item) applySuggest(item.dataset.value);
+  });
+  document.body.appendChild(suggestNode);
+  return suggestNode;
+}
+
+function positionSuggest() {
+  const node = suggestNode;
+  const input = suggestInput;
+  if (!node || !input || !input.isConnected || node.classList.contains("hidden")) return;
+
+  const rect = input.getBoundingClientRect();
+  const margin = 8;
+  const width = Math.min(Math.max(rect.width, 180), window.innerWidth - margin * 2);
+  node.style.width = `${width}px`;
+  node.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin))}px`;
+
+  const below = window.innerHeight - rect.bottom - margin;
+  const above = rect.top - margin;
+  node.style.maxHeight = `${Math.max(120, Math.min(260, Math.max(below, above) - 4))}px`;
+
+  if (below < 150 && above > below) {
+    node.style.top = "auto";
+    node.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+  } else {
+    node.style.bottom = "auto";
+    node.style.top = `${rect.bottom + 4}px`;
+  }
+}
+
+function renderSuggest(query = suggestQuery) {
+  const node = ensureSuggestNode();
+  const input = suggestInput;
+
+  if (!input || !input.isConnected || !state.meta) {
+    closeSuggest();
+    return;
+  }
+
+  suggestQuery = String(query ?? "");
+  const keyword = suggestQuery.trim().toLowerCase();
+  const all = suggestOptions(input.dataset.dict);
+  suggestItems = keyword ? all.filter((label) => label.toLowerCase().includes(keyword)) : all;
+  if (suggestIndex >= suggestItems.length) suggestIndex = -1;
+
+  node.innerHTML = suggestItems.length
+    ? suggestItems
+        .map(
+          (label, index) =>
+            `<button type="button" class="suggest-item${
+              index === suggestIndex ? " is-active" : ""
+            }" data-value="${esc(label)}">${esc(label)}</button>`,
+        )
+        .join("")
+    : `<div class="suggest-empty">${
+        keyword ? "没有匹配的，直接输入新名称即可" : "还没有候选项，直接输入即可"
+      }</div>`;
+
+  node.classList.remove("hidden");
+  positionSuggest();
+  node.querySelector(".suggest-item.is-active")?.scrollIntoView({ block: "nearest" });
+}
+
+function openSuggest(input) {
+  if (!input?.dataset?.dict || !state.meta) return;
+  suggestInput = input;
+  suggestIndex = -1;
+  suggestQuery = "";
+  renderSuggest(""); // 聚焦先给全部
+}
+
+function closeSuggest() {
+  if (suggestNode) suggestNode.classList.add("hidden");
+  suggestIndex = -1;
+  suggestItems = [];
+  suggestQuery = "";
+}
+
+function moveSuggest(step) {
+  if (!suggestItems.length) return;
+  suggestIndex = (suggestIndex + step + suggestItems.length) % suggestItems.length;
+  renderSuggest(suggestQuery);
+}
+
+function applySuggest(value) {
+  const input = suggestInput;
+  if (!input) return;
+
+  suggestApplying = true;
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  suggestApplying = false;
+
+  closeSuggest();
+  input.focus();
+  input.setSelectionRange?.(value.length, value.length);
+}
+
+document.addEventListener("focusin", (event) => {
+  const input = event.target.closest?.("input[data-dict]");
+  if (input) openSuggest(input);
+});
+
+document.addEventListener("focusout", (event) => {
+  if (!event.target.closest?.("input[data-dict]")) return;
+  setTimeout(() => {
+    if (document.activeElement !== suggestInput) closeSuggest();
+  }, 120);
+});
+
+document.addEventListener("input", (event) => {
+  const input = event.target.closest?.("input[data-dict]");
+  if (!input || suggestApplying) return;
+  if (input !== suggestInput) suggestInput = input;
+  suggestIndex = -1;
+  renderSuggest(input.value);
+});
+
+document.addEventListener("keydown", (event) => {
+  const input = event.target.closest?.("input[data-dict]");
+  if (!input || input !== suggestInput) return;
+
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    moveSuggest(event.key === "ArrowDown" ? 1 : -1);
+  } else if (event.key === "Enter" && suggestIndex >= 0) {
+    event.preventDefault();
+    applySuggest(suggestItems[suggestIndex]);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeSuggest();
+  } else if (event.key === "Tab") {
+    closeSuggest();
+  }
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!suggestNode || suggestNode.classList.contains("hidden")) return;
+  if (event.target.closest?.(".suggest") || event.target.closest?.("input[data-dict]")) return;
+  closeSuggest();
+});
+
+window.addEventListener("resize", closeSuggest);
+window.addEventListener("scroll", closeSuggest, true);
 
 /* ---------------------------------------------------------------- 拍照识别 */
 
@@ -1552,7 +1715,6 @@ function renderConfig() {
         <div class="config-grid" id="dict-grid">
           ${Object.keys(meta.dictKinds).map((kind) => dictColumnHtml(kind)).join("")}
         </div>
-        ${datalistsHtml()}
       </div>
 
       <details class="card details-card" ${usesPrice ? "open" : ""}>
@@ -1571,10 +1733,10 @@ function renderConfig() {
                 </select>
               </label>
               <label class="field"><span>客户名称</span>
-                <input id="p-customer" type="text" list="dl-customer" placeholder="* = 任意客户" value="*" />
+                <input id="p-customer" type="text" data-dict="customer" placeholder="* = 任意客户" value="*" />
               </label>
               <label class="field"><span>车型</span>
-                <input id="p-model" type="text" list="dl-truck_model" placeholder="* = 任意车型" value="*" />
+                <input id="p-model" type="text" data-dict="truck_model" placeholder="* = 任意车型" value="*" />
               </label>
               <label class="field"><span>单价（元/方）</span><input id="p-price" type="number" step="0.01" min="0" placeholder="0.00" /></label>
               <label class="field span-2"><span>备注</span><input id="p-note" type="text" placeholder="例如：2026 年 11 月起执行" /></label>
@@ -1940,8 +2102,6 @@ async function refreshDicts(kind) {
   state.meta = await api("/api/meta");
   const column = $(`.dict-column[data-kind="${kind}"]`);
   if (column) column.outerHTML = dictColumnHtml(kind);
-  const list = $(`datalist#dl-${kind}`);
-  if (list) list.innerHTML = (state.meta.dicts[kind] || []).map((item) => `<option value="${esc(item.label)}"></option>`).join("");
 }
 
 function insertAtCursor(input, text) {

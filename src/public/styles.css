@@ -1563,6 +1563,47 @@ table.table {
   grid-column: span 3;
 }
 
+/* 名称候选下拉（替代 datalist）：聚焦给全部，输入才筛选 */
+.suggest {
+  position: fixed;
+  z-index: 70;
+  overflow: auto;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 18px 40px -18px rgba(15, 23, 42, 0.45);
+}
+
+.suggest-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggest-item:hover,
+.suggest-item.is-active {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
+.suggest-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ---------------------------------------------------------------- 提示条 */
 
 .notice {
