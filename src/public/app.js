@@ -1424,8 +1424,8 @@ function renderDetailTable() {
   if (nav) {
     nav.innerHTML = days.length
       ? `<span class="day-count">第 ${state.page} / ${days.length} 天</span>
-         <button class="btn btn-sm" type="button" data-page="prev" ${state.page <= 1 ? "disabled" : ""}>上一天</button>
-         <button class="btn btn-sm" type="button" data-page="next" ${state.page >= totalPages ? "disabled" : ""}>下一天</button>`
+         <button class="btn btn-sm" type="button" data-page="prev" ${state.page <= 1 ? "disabled" : ""}>上一页</button>
+         <button class="btn btn-sm" type="button" data-page="next" ${state.page >= totalPages ? "disabled" : ""}>下一页</button>`
       : "";
   }
 }
