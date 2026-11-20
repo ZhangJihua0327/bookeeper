@@ -577,6 +577,16 @@ body.health-bad {
   background: var(--brand-soft);
 }
 
+.ocr-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
 .ocr-drop-body {
   display: flex;
   align-items: center;

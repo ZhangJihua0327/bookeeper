@@ -11,6 +11,7 @@ const state = {
   page: 1,
   pageSize: 20,
   groupBy: "customer",
+  entryMode: "manual",
   photo: { dataUrl: "", date: "", drafts: [] },
 };
 
@@ -142,7 +143,6 @@ function switchTab(tab) {
   state.tab = tab;
   $$(".tab").forEach((node) => node.classList.toggle("is-active", node.dataset.tab === tab));
   $("#view-entry").classList.toggle("hidden", tab !== "entry");
-  $("#view-photo").classList.toggle("hidden", tab !== "photo");
   $("#view-board").classList.toggle("hidden", tab !== "board");
   $("#view-config").classList.toggle("hidden", tab !== "config");
 
@@ -151,7 +151,6 @@ function switchTab(tab) {
   }
 
   if (tab === "entry") renderEntry();
-  if (tab === "photo") renderPhoto();
   if (tab === "board") renderBoard();
   if (tab === "config") renderConfig();
 }
@@ -197,6 +196,7 @@ function fieldHtml(field) {
 
 function renderEntry() {
   const scope = currentScope();
+  const mode = state.entryMode;
   const editing = state.editingId
     ? `<span class="badge badge-warn">正在编辑 #${state.editingId}</span>`
     : "";
@@ -206,50 +206,21 @@ function renderEntry() {
       <div class="card">
         <div class="card-head">
           <div>
-            <h2 class="card-title">填写${esc(scope.tableName)}</h2>
-            <p class="card-desc">日期、客户、方量为必填；金额按“配置 → 金额公式”实时计算。</p>
+            <h2 class="card-title">${mode === "photo" ? "拍照识别" : `填写${esc(scope.tableName)}`}</h2>
+            <p class="card-desc">${
+              mode === "photo"
+                ? "上传手写台账照片，AI 识别成草稿，核对后再入库——识别结果不会直接写库。"
+                : "日期、客户、方量为必填；金额按「配置 → 金额公式」实时计算。"
+            }</p>
           </div>
           <div class="spacer"></div>
-          <div class="segmented" id="scope-switch">
-            ${state.meta.scopes
-              .map(
-                (item) =>
-                  `<button type="button" data-scope="${item.key}" class="${
-                    item.key === state.scope ? "is-active" : ""
-                  }">${esc(item.tableName)}</button>`,
-              )
-              .join("")}
+          <div class="segmented" id="entry-mode">
+            <button type="button" data-mode="manual" class="${mode === "manual" ? "is-active" : ""}">手工录入</button>
+            <button type="button" data-mode="photo" class="${mode === "photo" ? "is-active" : ""}">拍照识别</button>
           </div>
         </div>
 
-        <form id="entry-form" autocomplete="off">
-          <div class="form-grid">
-            ${scope.fields.map((field) => fieldHtml(field)).join("")}
-            ${fieldHtml({
-              key: "amount_override",
-              label: "金额（选填）",
-              type: "number",
-              required: false,
-              placeholder: "留空自动算",
-              hint: "留空按公式计算，填写则以此为准",
-            })}
-          </div>
-
-          <div class="live-bar" id="live-bar">
-            <span class="live-item">方量 <span class="live-value" data-live="volume">—</span> 方</span>
-            <span class="live-item">单价 <span class="live-value" data-live="price">—</span> 元/方</span>
-            <span class="live-item">金额 <span class="live-value" data-live="amount">—</span> 元</span>
-            <span class="live-note" data-live="note"></span>
-          </div>
-
-          <div class="form-actions">
-            <button class="btn btn-primary" type="submit">${state.editingId ? "保存修改" : "保存记录"}</button>
-            <button class="btn" type="button" id="reset-btn">清空</button>
-            <span class="spacer"></span>
-            ${editing}
-            <span class="hint">时间：${esc(state.meta.today)}（Asia/Shanghai）</span>
-          </div>
-        </form>
+        ${mode === "photo" ? photoPanelHtml() : manualPanelHtml(scope, editing)}
       </div>
 
       <div class="card card-tight">
@@ -268,11 +239,75 @@ function renderEntry() {
   `;
 
   bindEntryEvents();
-  updateLive();
+  bindPhotoEvents();
+
+  if (mode === "photo") {
+    renderPhotoPreview();
+    renderDrafts();
+  } else {
+    updateLive();
+  }
   refreshRecent();
 }
 
+function manualPanelHtml(scope, editing) {
+  return `
+    <div class="segmented" id="scope-switch" style="margin-bottom:14px">
+      ${state.meta.scopes
+        .map(
+          (item) =>
+            `<button type="button" data-scope="${item.key}" class="${
+              item.key === state.scope ? "is-active" : ""
+            }">${esc(item.tableName)}</button>`,
+        )
+        .join("")}
+    </div>
+
+    <form id="entry-form" autocomplete="off">
+      <div class="form-grid">
+        ${scope.fields.map((field) => fieldHtml(field)).join("")}
+        ${fieldHtml({
+          key: "amount_override",
+          label: "金额（选填）",
+          type: "number",
+          required: false,
+          placeholder: "留空自动算",
+          hint: "留空按公式计算，填写则以此为准",
+        })}
+      </div>
+
+      <div class="live-bar" id="live-bar">
+        <span class="live-item">方量 <span class="live-value" data-live="volume">—</span> 方</span>
+        <span class="live-item">单价 <span class="live-value" data-live="price">—</span> 元/方</span>
+        <span class="live-item">金额 <span class="live-value" data-live="amount">—</span> 元</span>
+        <span class="live-note" data-live="note"></span>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">${state.editingId ? "保存修改" : "保存记录"}</button>
+        <button class="btn" type="button" id="reset-btn">清空</button>
+        <span class="spacer"></span>
+        ${editing}
+        <span class="hint">时间：${esc(state.meta.today)}（Asia/Shanghai）</span>
+      </div>
+    </form>
+  `;
+}
+
 function bindEntryEvents() {
+  $$("#entry-mode button").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.mode === state.entryMode) return;
+      state.entryMode = button.dataset.mode;
+      renderEntry();
+    });
+  });
+
+  $("#refresh-recent")?.addEventListener("click", refreshRecent);
+
+  const form = $("#entry-form");
+  if (!form) return;
+
   $$("#scope-switch button").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.scope === state.scope) return;
@@ -282,15 +317,14 @@ function bindEntryEvents() {
     });
   });
 
-  $("#entry-form").addEventListener("input", scheduleLive);
-  $("#entry-form").addEventListener("change", scheduleLive);
-  $("#entry-form").addEventListener("submit", submitEntry);
-  $("#reset-btn").addEventListener("click", () => {
+  form.addEventListener("input", scheduleLive);
+  form.addEventListener("change", scheduleLive);
+  form.addEventListener("submit", submitEntry);
+  $("#reset-btn")?.addEventListener("click", () => {
     state.editingId = null;
     resetForm();
     toast("已清空表单");
   });
-  $("#refresh-recent").addEventListener("click", refreshRecent);
 }
 
 function readEntryForm() {
@@ -550,72 +584,62 @@ async function deleteRecord(id, after) {
 
 /* ---------------------------------------------------------------- 拍照录入页 */
 
-function renderPhoto() {
+function photoPanelHtml() {
   const ocr = state.meta.ocr || {};
   const photo = state.photo;
   const hasDrafts = photo.drafts.length > 0;
 
-  $("#view-photo").innerHTML = `
-    <div class="stack">
-      ${
-        ocr.enabled
-          ? ""
-          : `<div class="card card-tight"><div class="notice"><div class="notice-body">
-               服务端还没有配置 <code>DASHSCOPE_API_KEY</code>，拍照识别暂时不可用。
-             </div></div></div>`
-      }
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h2 class="card-title">拍照入账</h2>
-            <p class="card-desc">上传手写台账照片，AI 先识别成草稿，你核对修改后再入库——识别结果不会直接写库。</p>
-          </div>
-          <div class="spacer"></div>
-          <span class="badge">${esc(ocr.model || "qwen3-vl-plus")}</span>
-        </div>
+  return `
+    ${
+      ocr.enabled
+        ? ""
+        : `<div class="notice" style="margin-bottom:12px"><div class="notice-body">
+             服务端还没有配置 <code>DASHSCOPE_API_KEY</code>，拍照识别暂时不可用。
+           </div></div>`
+    }
 
-        <div class="ocr-drop" id="ocr-drop">
-          <input type="file" id="ocr-file" accept="image/*" capture="environment" hidden />
-          <div class="ocr-drop-body">
-            <button class="btn btn-primary" type="button" id="ocr-pick">选择 / 拍摄照片</button>
-            <span class="hint">支持 JPG / PNG；也可以 <b>Ctrl+V 粘贴截图</b>，或把图片拖进来</span>
-          </div>
-          <div id="ocr-preview"></div>
-        </div>
-
-        <div class="form-actions">
-          <button class="btn btn-primary" type="button" id="ocr-run" ${photo.dataUrl && ocr.enabled ? "" : "disabled"}>开始识别</button>
-          ${hasDrafts ? '<button class="btn" type="button" id="ocr-again">重新识别</button>' : ""}
-          <span class="hint" id="ocr-status"></span>
-        </div>
+    <div class="ocr-drop" id="ocr-drop">
+      <input type="file" id="ocr-file" accept="image/*" capture="environment" hidden />
+      <div class="ocr-drop-body">
+        <button class="btn btn-primary" type="button" id="ocr-pick">选择 / 拍摄照片</button>
+        <span class="hint">支持 JPG / PNG；也可以 <b>Ctrl+V 粘贴截图</b>，或把图片拖进来</span>
+        <span class="badge">${esc(ocr.model || "qwen3-vl-plus")}</span>
       </div>
+      <div id="ocr-preview"></div>
+    </div>
 
-      <div class="card" id="ocr-result-card" ${hasDrafts ? "" : "hidden"}>
-        <div class="card-head">
-          <div>
-            <h2 class="card-title">识别草稿</h2>
-            <p class="card-desc">逐行核对：表、客户、方量、备注都能直接改；确认无误再入库</p>
-          </div>
-          <div class="spacer"></div>
-          <label class="field" style="width:168px"><span>日期</span><input type="date" id="ocr-date" value="${esc(
-            photo.date || state.meta.today,
-          )}" /></label>
-        </div>
-        <div id="ocr-table"></div>
-        <div class="form-actions">
-          <button class="btn btn-primary" type="button" id="ocr-save">确认入库</button>
-          <button class="btn" type="button" id="ocr-clear">清空</button>
-          <span class="spacer"></span>
-          <span class="hint">共 ${photo.drafts.length} 条</span>
-        </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="button" id="ocr-run" ${photo.dataUrl && ocr.enabled ? "" : "disabled"}>开始识别</button>
+      ${hasDrafts ? '<button class="btn" type="button" id="ocr-again">重新识别</button>' : ""}
+      <span class="hint" id="ocr-status"></span>
+    </div>
+
+    <div id="ocr-result-card" ${hasDrafts ? "" : "hidden"}>
+      <div class="ocr-result-head">
+        <h3 class="section-title" style="margin:0">识别草稿</h3>
+        <label class="field" style="width:168px"><span>日期</span><input type="date" id="ocr-date" value="${esc(
+          photo.date || state.meta.today,
+        )}" /></label>
+      </div>
+      <div id="ocr-table"></div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="button" id="ocr-save">确认入库</button>
+        <button class="btn" type="button" id="ocr-clear">清空</button>
+        <span class="spacer"></span>
+        <span class="hint">共 ${photo.drafts.length} 条</span>
       </div>
     </div>
-    ${datalistsHtml()}
   `;
+}
 
-  bindPhotoEvents();
-  renderPhotoPreview();
-  renderDrafts();
+/** 切到「拍照识别」模式（粘贴图片时自动调用） */
+function switchToPhoto() {
+  state.entryMode = "photo";
+  if (state.tab !== "entry") {
+    switchTab("entry");
+  } else {
+    renderEntry();
+  }
 }
 
 function bindPhotoEvents() {
@@ -639,7 +663,7 @@ function bindPhotoEvents() {
   $("#ocr-save")?.addEventListener("click", saveDrafts);
   $("#ocr-clear")?.addEventListener("click", () => {
     state.photo = { dataUrl: "", date: "", drafts: [] };
-    renderPhoto();
+    renderEntry();
   });
   $("#ocr-date")?.addEventListener("change", (event) => {
     state.photo.date = event.target.value;
@@ -676,7 +700,7 @@ document.addEventListener("paste", async (event) => {
   const file = imageFromClipboard(event.clipboardData);
   if (!file) return;
   event.preventDefault();
-  if (state.tab !== "photo") switchTab("photo");
+  if (state.tab !== "entry" || state.entryMode !== "photo") switchToPhoto();
   await loadPhotoFile(file);
 });
 
@@ -695,7 +719,7 @@ async function loadPhotoFile(file) {
     state.photo.dataUrl = await compressImage(file);
     state.photo.drafts = [];
     state.photo.date = "";
-    renderPhoto();
+    renderEntry();
     const next = $("#ocr-status");
     if (next) next.textContent = "图片已就绪，点「开始识别」";
   } catch (error) {
@@ -740,7 +764,7 @@ async function runOcr() {
     const result = await api("/api/ocr", { method: "POST", body: { image: state.photo.dataUrl } });
     state.photo.date = result.date || state.meta.today;
     state.photo.drafts = result.entries || [];
-    renderPhoto();
+    renderEntry();
     toast(`识别到 ${state.photo.drafts.length} 条，请核对`);
   } catch (error) {
     toast(error.message, true);
@@ -875,7 +899,7 @@ async function saveDrafts() {
 
   toast(`已入库 ${saved} 条${skipped ? `（跳过 ${skipped} 行缺客户/方量）` : ""}`);
   state.photo = { dataUrl: "", date: "", drafts: [] };
-  renderPhoto();
+  renderEntry();
 }
 
 /* ---------------------------------------------------------------- 看板 */
