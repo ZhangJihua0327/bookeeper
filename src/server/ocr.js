@@ -3,6 +3,8 @@
  * 只负责“识别 + 归一化”，写库由前端确认后调 /api/records 完成。
  */
 
+import { evaluateRemarkExpression } from "./formula.js";
+
 const ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 
 export const DEFAULT_OCR_MODEL = "qwen3-vl-plus";
@@ -46,7 +48,9 @@ ${modelHint}
 5. 客户名优先用参考名单里字形最接近的那个；认不出的字用「?」代替并写进 uncertain。
 6. 日期只有「月日」时，年份用 2026。
 7. 被划掉的内容不要输出；不要臆造不存在的行。
-8. **手写会换行**：一行内容可能折到下一行（常见的是方量或「方」字单独写在下一行），这种续行要并回上一条，不要当成新的一条。
+8. **手写会换行**：一条记录常因写不下而折到下一行，要把它并回同一条，不要拆成新行。
+   - 典型情况：上一行行尾只写了「8」、下一行单独写「5方」，应读成 **85 方**，并把 raw 写成两行拼起来；
+   - 8 和 5、3 和 5 最容易混，逐位核对。
 9. 不确定就降低 confidence，不要为了凑数而猜。`;
 }
 
@@ -84,19 +88,48 @@ export function normalizeOcrResult(raw, { today = "" } = {}) {
     const volume = Number(item?.volume);
     if (!customer && !(volume > 0)) continue;
 
-    const confidence = Number(item?.confidence);
+    const note = String(item?.note ?? "").trim().slice(0, 255);
+    const volumeValue = Number.isFinite(volume) ? Math.round(volume * 1000) / 1000 : 0;
+    const uncertain = Array.isArray(item?.uncertain) ? item.uncertain.map((value) => String(value)).slice(0, 6) : [];
+    const rawConfidence = Number(item?.confidence);
+    let confidence = Number.isFinite(rawConfidence) ? Math.min(Math.max(rawConfidence, 0), 1) : null;
+
+    // 搅拌车：用备注里的算式反算方量，对不上就标出来并压低置信度
+    if (table === "mixer") {
+      const expected = arithmeticFromNote(note);
+      if (expected !== null && Math.abs(expected - volumeValue) > 0.001) {
+        if (!uncertain.includes("volume")) uncertain.push("volume");
+        confidence = confidence === null ? 0.5 : Math.min(confidence, 0.5);
+      }
+    }
+
     entries.push({
       table,
       customer,
-      volume: Number.isFinite(volume) ? Math.round(volume * 1000) / 1000 : 0,
-      note: String(item?.note ?? "").trim().slice(0, 255),
+      volume: volumeValue,
+      note,
       raw: String(item?.raw ?? "").trim().slice(0, 255),
-      confidence: Number.isFinite(confidence) ? Math.min(Math.max(confidence, 0), 1) : null,
-      uncertain: Array.isArray(item?.uncertain) ? item.uncertain.map((value) => String(value)).slice(0, 6) : [],
+      confidence,
+      uncertain,
     });
   }
 
   return { date, entries: mergeMixerEntries(entries) };
+}
+
+/**
+ * 从搅拌车备注里抠出算式求和（去掉中文司机名），用于反算校验。
+ * 例如「12×3 姜」→ 36；「8+3 子姜」→ 11；无法解析时返回 null。
+ */
+export function arithmeticFromNote(note) {
+  const cleaned = String(note ?? "")
+    .replace(/[\u4e00-\u9fa5]+/g, " ")
+    .replace(/[，,；;、]/g, "+")
+    .trim();
+  if (!/\d/.test(cleaned)) return null;
+
+  const result = evaluateRemarkExpression(cleaned);
+  return result.error ? null : result.value;
 }
 
 const round3 = (value) => Math.round(value * 1000) / 1000;

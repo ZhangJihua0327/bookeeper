@@ -585,6 +585,7 @@ function renderPhoto() {
 
         <div class="form-actions">
           <button class="btn btn-primary" type="button" id="ocr-run" ${photo.dataUrl && ocr.enabled ? "" : "disabled"}>开始识别</button>
+          ${hasDrafts ? '<button class="btn" type="button" id="ocr-again">重新识别</button>' : ""}
           <span class="hint" id="ocr-status"></span>
         </div>
       </div>
@@ -620,6 +621,7 @@ function bindPhotoEvents() {
   $("#ocr-pick")?.addEventListener("click", () => $("#ocr-file")?.click());
   $("#ocr-file")?.addEventListener("change", handlePhotoFile);
   $("#ocr-run")?.addEventListener("click", runOcr);
+  $("#ocr-again")?.addEventListener("click", runOcr);
   $("#ocr-save")?.addEventListener("click", saveDrafts);
   $("#ocr-clear")?.addEventListener("click", () => {
     state.photo = { dataUrl: "", date: "", drafts: [] };
@@ -658,7 +660,7 @@ async function handlePhotoFile(event) {
   }
 }
 
-async function compressImage(file, maxSide = 1600, quality = 0.85) {
+async function compressImage(file, maxSide = 2600, quality = 0.88) {
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));

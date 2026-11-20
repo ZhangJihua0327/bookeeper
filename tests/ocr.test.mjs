@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildOcrPrompt, extractJson, mergeMixerEntries, normalizeOcrResult, recognizeLedger } from "../src/server/ocr.js";
+import {
+  arithmeticFromNote,
+  buildOcrPrompt,
+  extractJson,
+  mergeMixerEntries,
+  normalizeOcrResult,
+  recognizeLedger,
+} from "../src/server/ocr.js";
 
 test("提示词带上客户与车型名单", () => {
   const prompt = buildOcrPrompt({ customers: ["朱水波", "贾建"], truckModels: ["一号", "二号"] });
@@ -29,7 +36,7 @@ test("normalizeOcrResult 归一化字段并过滤脏数据", () => {
       date: "2026-11-18",
       entries: [
         { table: "pump", customer: " 贾建 ", volume: "35", note: "垫层", confidence: 0.9 },
-        { table: "mixer", customer: "朱水波", volume: 52, note: "12×3 姜" },
+        { table: "mixer", customer: "朱水波", volume: 52, note: "12×3 姜，8×2 薛" },
         { table: "unknown", customer: "x", volume: 1 },
         { table: "pump", customer: "", volume: 0 },
         { table: "pump", customer: "亿德鑫", volume: 8, confidence: 1.7 },
@@ -50,6 +57,28 @@ test("normalizeOcrResult 归一化字段并过滤脏数据", () => {
 test("normalizeOcrResult 日期非法时回退到今天", () => {
   const result = normalizeOcrResult({ date: "11月18日", entries: [] }, { today: "2026-11-20" });
   assert.equal(result.date, "2026-11-20");
+});
+
+test("arithmeticFromNote 能从备注里抠出算式", () => {
+  assert.equal(arithmeticFromNote("12×3 姜"), 36);
+  assert.equal(arithmeticFromNote("8+3 子姜"), 11);
+  assert.equal(arithmeticFromNote("8×2 薛"), 16);
+  assert.equal(arithmeticFromNote("12×2 8×2 薛"), 40);
+  assert.equal(arithmeticFromNote(""), null);
+});
+
+test("搅拌车方量与备注算式对不上时自动标出来并降置信度", () => {
+  const result = normalizeOcrResult({
+    date: "2026-11-18",
+    entries: [
+      { table: "mixer", customer: "朱水波", volume: 36, note: "12×3 姜", confidence: 0.95 },
+      { table: "mixer", customer: "贾建", volume: 11, note: "12×3 姜", confidence: 0.95 },
+    ],
+  });
+
+  assert.equal(result.entries[0].uncertain.includes("volume"), false);
+  assert.equal(result.entries[1].uncertain.includes("volume"), true);
+  assert.ok(result.entries[1].confidence <= 0.5);
 });
 
 test("同一客户的搅拌车多行合并成一条（方量相加、明细换行）", () => {
