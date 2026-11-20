@@ -736,7 +736,7 @@ function renderDrafts() {
               <td><input type="number" step="0.001" min="0" data-idx="${index}" data-field="volume" value="${esc(
                 draft.volume,
               )}" /></td>
-              <td><input type="text" data-idx="${index}" data-field="note" value="${esc(draft.note)}" /></td>
+              <td><textarea rows="2" data-idx="${index}" data-field="note">${esc(draft.note)}</textarea></td>
               <td class="wrap muted">${esc(draft.raw) || "—"}</td>
               <td>${confidenceBadge(draft)}</td>
               <td><div class="row-actions"><button class="btn btn-sm btn-danger" type="button" data-del="${index}">删除</button></div></td>
@@ -782,6 +782,7 @@ function confidenceBadge(draft) {
 async function saveDrafts() {
   const date = $("#ocr-date")?.value || state.meta.today;
   const drafts = state.photo.drafts.filter((draft) => draft.customer.trim() && Number(draft.volume) > 0);
+  const skipped = state.photo.drafts.length - drafts.length;
   if (!drafts.length) {
     toast("没有可入库的行（客户和方量都要有值）", true);
     return;
@@ -818,7 +819,7 @@ async function saveDrafts() {
     return;
   }
 
-  toast(`已入库 ${saved} 条`);
+  toast(`已入库 ${saved} 条${skipped ? `（跳过 ${skipped} 行缺客户/方量）` : ""}`);
   state.photo = { dataUrl: "", date: "", drafts: [] };
   renderPhoto();
 }

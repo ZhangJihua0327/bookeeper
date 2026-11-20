@@ -587,6 +587,12 @@ body.health-bad {
   border: 1px solid var(--line);
 }
 
+.table textarea {
+  min-height: 44px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* ---------- 筛选栏 ---------- */
 
 .filter-bar {

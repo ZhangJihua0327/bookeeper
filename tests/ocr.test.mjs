@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildOcrPrompt, extractJson, normalizeOcrResult, recognizeLedger } from "../src/server/ocr.js";
+import { buildOcrPrompt, extractJson, mergeMixerEntries, normalizeOcrResult, recognizeLedger } from "../src/server/ocr.js";
 
 test("提示词带上客户与车型名单", () => {
   const prompt = buildOcrPrompt({ customers: ["朱水波", "贾建"], truckModels: ["一号", "二号"] });
@@ -9,6 +9,7 @@ test("提示词带上客户与车型名单", () => {
   assert.match(prompt, /车型：一号、二号/);
   assert.match(prompt, /只输出严格 JSON/);
   assert.match(prompt, /8\+3/);
+  assert.match(prompt, /手写会换行/);
 });
 
 test("提示词在没有名单时也能用", () => {
@@ -49,6 +50,35 @@ test("normalizeOcrResult 归一化字段并过滤脏数据", () => {
 test("normalizeOcrResult 日期非法时回退到今天", () => {
   const result = normalizeOcrResult({ date: "11月18日", entries: [] }, { today: "2026-11-20" });
   assert.equal(result.date, "2026-11-20");
+});
+
+test("同一客户的搅拌车多行合并成一条（方量相加、明细换行）", () => {
+  const result = normalizeOcrResult({
+    date: "2026-11-18",
+    entries: [
+      { table: "mixer", customer: "朱水波", volume: 36, note: "12×3 姜", raw: "朱水波 12×3 姜", confidence: 0.95 },
+      { table: "mixer", customer: "朱水波", volume: 16, note: "8×2 薛", raw: "8×2 薛", confidence: 0.8, uncertain: ["customer"] },
+      { table: "pump", customer: "朱水波", volume: 5, note: "地坪" },
+    ],
+  });
+
+  assert.equal(result.entries.length, 2, "朱水波的泵车记录不应被合并进来");
+  const merged = result.entries[0];
+  assert.equal(merged.table, "mixer");
+  assert.equal(merged.volume, 52);
+  assert.equal(merged.note, "12×3 姜\n8×2 薛");
+  assert.equal(merged.raw, "朱水波 12×3 姜 / 8×2 薛");
+  assert.equal(merged.confidence, 0.8);
+  assert.deepEqual(merged.uncertain, ["customer"]);
+});
+
+test("合并只作用于搅拌车，泵车同客户多条保持独立", () => {
+  const merged = mergeMixerEntries([
+    { table: "pump", customer: "贾建", volume: 11, note: "圈梁", raw: "", confidence: null, uncertain: [] },
+    { table: "pump", customer: "贾建", volume: 8, note: "板坪", raw: "", confidence: null, uncertain: [] },
+  ]);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[1].volume, 8);
 });
 
 test("recognizeLedger 解析模型返回内容", async () => {

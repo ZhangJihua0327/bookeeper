@@ -46,7 +46,8 @@ ${modelHint}
 5. 客户名优先用参考名单里字形最接近的那个；认不出的字用「?」代替并写进 uncertain。
 6. 日期只有「月日」时，年份用 2026。
 7. 被划掉的内容不要输出；不要臆造不存在的行。
-8. 不确定就降低 confidence，不要为了凑数而猜。`;
+8. **手写会换行**：一行内容可能折到下一行（常见的是方量或「方」字单独写在下一行），这种续行要并回上一条，不要当成新的一条。
+9. 不确定就降低 confidence，不要为了凑数而猜。`;
 }
 
 /** 模型偶尔会套 ```json 代码块或前后加话，这里做健壮提取。 */
@@ -95,7 +96,44 @@ export function normalizeOcrResult(raw, { today = "" } = {}) {
     });
   }
 
-  return { date, entries };
+  return { date, entries: mergeMixerEntries(entries) };
+}
+
+const round3 = (value) => Math.round(value * 1000) / 1000;
+
+/**
+ * 搅拌车按「同一客户当天一条」合并：方量相加，司机明细用换行连接。
+ * 与历史台账的写法保持一致（一条记录里多行司机明细）。
+ */
+export function mergeMixerEntries(entries) {
+  const merged = [];
+  const indexByCustomer = new Map();
+
+  for (const entry of entries) {
+    if (entry.table !== "mixer" || !entry.customer) {
+      merged.push(entry);
+      continue;
+    }
+
+    const existingIndex = indexByCustomer.get(entry.customer);
+    if (existingIndex === undefined) {
+      indexByCustomer.set(entry.customer, merged.length);
+      merged.push({ ...entry, uncertain: [...entry.uncertain] });
+      continue;
+    }
+
+    const target = merged[existingIndex];
+    target.volume = round3(target.volume + entry.volume);
+    target.note = [target.note, entry.note].filter(Boolean).join("\n");
+    target.raw = [target.raw, entry.raw].filter(Boolean).join(" / ");
+    if (entry.confidence !== null) {
+      target.confidence =
+        target.confidence === null ? entry.confidence : Math.min(target.confidence, entry.confidence);
+    }
+    target.uncertain = [...new Set([...target.uncertain, ...entry.uncertain])];
+  }
+
+  return merged;
 }
 
 /**
