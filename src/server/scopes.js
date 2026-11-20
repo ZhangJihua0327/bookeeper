@@ -10,7 +10,7 @@ export const SCOPES = {
     tableName: "泵车表",
     fields: [
       { key: "entry_date", label: "日期", type: "date", required: true },
-      { key: "truck_model", label: "车型", type: "dict", dict: "truck_model", required: false, placeholder: "选填，如 二号" },
+      { key: "truck_model", label: "车型", type: "dict", dict: "truck_model", required: true },
       { key: "customer_name", label: "客户名称", type: "dict", dict: "customer", required: true },
       { key: "volume", label: "方量", type: "number", required: true },
       { key: "remark", label: "备注", type: "text", required: false, placeholder: "选填" },

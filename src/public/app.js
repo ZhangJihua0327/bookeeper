@@ -911,6 +911,12 @@ async function saveDrafts() {
     return;
   }
 
+  const missingModel = drafts.filter((draft) => draft.table === "pump" && !String(draft.truck_model || "").trim());
+  if (missingModel.length) {
+    toast(`有 ${missingModel.length} 行泵车没填车型（圈号即车号），补一下再入库`, true);
+    return;
+  }
+
   const button = $("#ocr-save");
   if (button) button.disabled = true;
 
