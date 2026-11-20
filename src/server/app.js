@@ -21,7 +21,6 @@ import {
 } from "./formula.js";
 import { buildPriceIndex } from "./prices.js";
 import { DEFAULT_OCR_MODEL, recognizeLedger } from "./ocr.js";
-import { listPhotoDates, listPhotos, mimeFor, resolvePhotoPath, savePhoto } from "./photos.js";
 import { DICT_KINDS, formatDate, isScope, SCOPE_KEYS, SCOPES, scopeDef, toFormulaValues } from "./scopes.js";
 import { DEFAULT_FORMULAS } from "./seed.js";
 
@@ -229,56 +228,7 @@ async function handleApi({ request, response, url, path, method, store, config, 
       throw new HttpError(502, `识别失败：${error.message || error}`);
     }
 
-    // 原图按日期归档，识别失败也不丢（这里是识别成功后才存）
-    let photo = null;
-    try {
-      const subtype = match[1].toLowerCase();
-      const ext = subtype === "png" ? "png" : subtype === "webp" ? "webp" : "jpg";
-      photo = await savePhoto({
-        root: config.photos.dir,
-        date: result.date || todayInZone(config.timeZone),
-        bytes,
-        ext,
-      });
-    } catch (error) {
-      logger.warn?.("[ocr] 照片归档失败", error?.message || error);
-    }
-
-    json(response, 200, { ok: true, data: { ...result, model: config.dashscope.model, photo } });
-    return;
-  }
-
-  if (method === "GET" && path === "/api/photos") {
-    const date = String(url.searchParams.get("date") || "").trim();
-    if (date) {
-      const items = await listPhotos(config.photos.dir, date);
-      json(response, 200, { ok: true, data: { date, photos: items } });
-    } else {
-      const dates = await listPhotoDates(config.photos.dir);
-      json(response, 200, { ok: true, data: { dates } });
-    }
-    return;
-  }
-
-  if (method === "GET" && path === "/api/photos/file") {
-    const date = String(url.searchParams.get("date") || "").trim();
-    const name = String(url.searchParams.get("name") || "").trim();
-    const filePath = resolvePhotoPath(config.photos.dir, date, name);
-    if (!filePath) throw new HttpError(400, "照片路径不正确");
-
-    let content;
-    try {
-      content = await readFile(filePath);
-    } catch {
-      throw new HttpError(404, "照片不存在");
-    }
-
-    response.writeHead(200, {
-      "Content-Type": mimeFor(name),
-      "Content-Length": content.length,
-      "Cache-Control": "private, max-age=31536000, immutable",
-    });
-    response.end(content);
+    json(response, 200, { ok: true, data: { ...result, model: config.dashscope.model } });
     return;
   }
 

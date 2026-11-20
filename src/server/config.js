@@ -31,10 +31,6 @@ export const config = {
     model: env.DASHSCOPE_VL_MODEL || DEFAULT_OCR_MODEL,
     timeoutMs: int(env.DASHSCOPE_TIMEOUT_MS, 120000),
   },
-  // 台账照片归档目录（按日期分目录）
-  photos: {
-    dir: env.PHOTO_DIR || "/data/photos",
-  },
 };
 
 if (!config.sessionSecret) {

@@ -58,12 +58,8 @@ services:
       # 拍照识别（阿里云百炼 DashScope）；不配则「拍照」页不可用
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       DASHSCOPE_VL_MODEL: ${DASHSCOPE_VL_MODEL:-qwen3-vl-plus}
-      # 台账照片归档目录（容器内），按 YYYY-MM-DD 分目录
-      PHOTO_DIR: /data/photos
     expose:
       - "3000"
-    volumes:
-      - photos:/data/photos
     healthcheck:
       test:
         [
@@ -93,5 +89,3 @@ networks:
 volumes:
   mysql-data:
     name: bookeeper-mysql-data
-  photos:
-    name: bookeeper-photos
