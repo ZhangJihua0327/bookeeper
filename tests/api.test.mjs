@@ -375,12 +375,12 @@ test("同一天按车型字面顺序排列，没填车型的排当天最后", as
 
   const list = await request(`/api/records?from=${date}&to=${date}`);
   const models = list.json.data.rows.map((row) => row.truck_model || "");
-  // 字面（码位）顺序：一(4E00) < 三(4E09) < 二(4E8C)，搅拌车不填车型所以垫底
-  assert.deepEqual(models, ["一号", "三号", "二号", ""]);
+  // 中文数字当数字看：一号 < 二号 < 三号，搅拌车不填车型所以垫底
+  assert.deepEqual(models, ["一号", "二号", "三号", ""]);
 
   const board = await request(`/api/dashboard?from=${date}&to=${date}`);
   assert.deepEqual(
     board.json.data.rows.map((row) => row.truck_model || ""),
-    ["一号", "三号", "二号", ""],
+    ["一号", "二号", "三号", ""],
   );
 });

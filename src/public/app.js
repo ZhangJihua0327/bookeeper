@@ -361,7 +361,7 @@ function rowHtml(row) {
       <td data-label="车型">
         <input type="text" list="dl-truck_model" data-uid="${row.uid}" data-field="truck_model" value="${esc(
           row.truck_model,
-        )}" placeholder="${modelRequired ? "必填，如 二号" : "选填"}" class="${modelRequired ? "is-required" : ""}" />
+        )}" placeholder="${modelRequired ? "必填，如 二号" : "选填"}" />
       </td>
       <td class="num" data-label="方量">
         <input class="num-input" type="number" step="0.001" min="0" data-uid="${row.uid}" data-field="volume" value="${esc(
@@ -439,10 +439,8 @@ function updateAmountCells() {
     }
     const manual = $(`[data-field="amount_override"][data-uid="${row.uid}"]`);
     if (manual) {
-      const filled = String(row.amount_override).trim() !== "";
-      manual.classList.toggle("is-manual", filled);
-      // 空行不展示“改写”输入，等填了内容再出现，避免界面噪音
-      manual.hidden = rowIsEmpty(row) && !filled;
+      // 手改金额的输入框始终可见可填，不随这一行有没有字而隐藏
+      manual.classList.toggle("is-manual", String(row.amount_override).trim() !== "");
     }
   }
 }
