@@ -10,3 +10,8 @@ tests
 coverage
 *.log
 README.md
+# 服务器上留下的旧证书/网关目录（root 权限），不需要进镜像
+certbot
+nginx
+SECRETS.local.md
+*.local.md
