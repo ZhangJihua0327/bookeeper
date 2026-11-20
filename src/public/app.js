@@ -12,6 +12,7 @@ const state = {
   pageSize: 20,
   groupBy: "customer",
   photo: { dataUrl: "", date: "", drafts: [] },
+  photoArchive: { dates: [], date: "", photos: [] },
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -609,12 +610,25 @@ function renderPhoto() {
           <span class="hint">共 ${photo.drafts.length} 条</span>
         </div>
       </div>
+
+      <div class="card card-tight">
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">照片存档</h2>
+            <p class="card-desc">识别过的原图按日期归档，点缩略图看大图</p>
+          </div>
+          <div class="spacer"></div>
+          <label class="field" style="width:168px"><span>日期</span><select id="archive-date"></select></label>
+        </div>
+        <div id="archive-grid" class="photo-grid"><div class="empty">加载中…</div></div>
+      </div>
     </div>
   `;
 
   bindPhotoEvents();
   renderPhotoPreview();
   renderDrafts();
+  loadArchive();
 }
 
 function bindPhotoEvents() {
@@ -813,6 +827,67 @@ function renderDrafts() {
       if (card && !state.photo.drafts.length) card.hidden = true;
     }),
   );
+}
+
+async function loadArchive() {
+  const grid = $("#archive-grid");
+  if (!grid) return;
+
+  try {
+    const data = await api("/api/photos");
+    state.photoArchive.dates = data.dates || [];
+
+    if (!state.photoArchive.dates.length) {
+      grid.innerHTML = `<div class="empty">还没有存档照片，识别一次就会自动归档</div>`;
+      return;
+    }
+
+    if (!state.photoArchive.date) state.photoArchive.date = state.photoArchive.dates[0].date;
+
+    const select = $("#archive-date");
+    if (select) {
+      select.innerHTML = state.photoArchive.dates
+        .map(
+          (item) =>
+            `<option value="${esc(item.date)}"${item.date === state.photoArchive.date ? " selected" : ""}>${esc(
+              item.date,
+            )}（${item.count}）</option>`,
+        )
+        .join("");
+      select.onchange = () => {
+        state.photoArchive.date = select.value;
+        loadArchivePhotos();
+      };
+    }
+
+    await loadArchivePhotos();
+  } catch (error) {
+    grid.innerHTML = `<div class="empty">加载失败：${esc(error.message)}</div>`;
+  }
+}
+
+async function loadArchivePhotos() {
+  const grid = $("#archive-grid");
+  if (!grid) return;
+
+  const date = state.photoArchive.date;
+  try {
+    const data = await api(`/api/photos?date=${encodeURIComponent(date)}`);
+    state.photoArchive.photos = data.photos || [];
+
+    grid.innerHTML = state.photoArchive.photos.length
+      ? state.photoArchive.photos
+          .map((photo) => {
+            const url = `/api/photos/file?date=${encodeURIComponent(date)}&name=${encodeURIComponent(photo.name)}`;
+            return `<a class="photo-thumb" href="${url}" target="_blank" rel="noreferrer" title="${esc(photo.name)}">
+                      <img src="${url}" alt="台账照片" loading="lazy" />
+                    </a>`;
+          })
+          .join("")
+      : `<div class="empty">这一天还没有照片</div>`;
+  } catch (error) {
+    grid.innerHTML = `<div class="empty">加载失败：${esc(error.message)}</div>`;
+  }
 }
 
 function confidenceBadge(draft) {
